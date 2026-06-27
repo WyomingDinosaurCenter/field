@@ -1,0 +1,2480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>WDC Field App</title>
+<meta name="description" content="Wyoming Dinosaur Center field specimen collection app">
+<meta name="theme-color" content="#1a1714">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="WDC Field">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="WDC_fieldApp.png">
+<link rel="apple-touch-icon" sizes="180x180" href="WDC_fieldApp.png">
+<link rel="apple-touch-icon" sizes="152x152" href="WDC_fieldApp.png">
+<link rel="apple-touch-icon" sizes="120x120" href="WDC_fieldApp.png">
+<link rel="icon" type="image/png" href="WDC_fieldApp.png">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F5F1EC;
+    --surface: #fff;
+    --card: #fff;
+    --card2: #EDE7DF;
+    --primary: #4A3728;
+    --accent: #C4A882;
+    --accent-dim: #9a7f60;
+    --success: #27AE60;
+    --danger: #E74C3C;
+    --warn: #F39C12;
+    --text: #2C1810;
+    --text-dim: #8B7355;
+    --border: #DDD0C5;
+    --input-bg: #F0EBE4;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    font-size: 16px;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ── SPLASH ── */
+  #splash {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 24px; z-index: 9999;
+    transition: opacity .4s;
+  }
+  #splash img { width: 260px; max-width: 72vw; border-radius: 20px; filter: drop-shadow(0 4px 16px rgba(74,55,40,0.18)); }
+  #splash .splash-title { font-size: 1.3rem; color: var(--primary); letter-spacing: .1em; font-weight: 700; }
+  #splash .splash-sub { font-size: .85rem; color: var(--text-dim); }
+
+  /* ── HEADER ── */
+  #header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px 8px;
+    background: var(--primary);
+    flex-shrink: 0;
+    min-height: 52px;
+  }
+  #header-title { font-size: 1.1rem; font-weight: 700; color: #fff; flex: 1; }
+  #online-badge {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--danger); flex-shrink: 0;
+    transition: background .3s;
+  }
+  #online-badge.online { background: var(--success); }
+  #header-user { font-size: .78rem; color: rgba(255,255,255,0.65); max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── MAIN CONTENT ── */
+  #main-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+
+  /* ── BOTTOM NAV ── */
+  #bottom-nav {
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    box-shadow: 0 -1px 8px rgba(0,0,0,.06);
+  }
+  .nav-tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 8px 4px 10px;
+    border: none; background: none; color: var(--text-dim);
+    font-size: .7rem; font-weight: 600; gap: 3px;
+    cursor: pointer; transition: color .2s;
+    min-height: 56px;
+  }
+  .nav-tab svg { width: 22px; height: 22px; }
+  .nav-tab.active { color: var(--primary); }
+
+  /* ── VIEWS ── */
+  .view { display: none; padding: 16px; padding-bottom: 80px; min-height: 100%; }
+  .view.active { display: block; }
+
+  /* ── LOGIN ── */
+  #login-view {
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 24px; gap: 20px;
+    background: var(--bg);
+  }
+  #login-view.active { display: flex; }
+  .login-logo {
+    width: 200px; max-width: 55vw;
+    border-radius: 16px;
+    margin-bottom: 4px;
+    filter: drop-shadow(0 4px 16px rgba(74,55,40,0.18));
+  }
+  .login-title { font-size: 1.5rem; font-weight: 700; color: var(--primary); letter-spacing: .02em; }
+  .login-sub { font-size: .85rem; color: var(--text-dim); margin-bottom: 8px; }
+  .login-form { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ── FORMS ── */
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: .8rem; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+  .form-input, .form-select, .form-textarea {
+    background: var(--input-bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius-sm);
+    padding: 11px 14px; font-size: 1rem; font-family: inherit;
+    transition: border-color .2s; width: 100%;
+    -webkit-appearance: none;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .form-textarea { resize: vertical; min-height: 80px; }
+  .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a09080' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+  #occ-scientific-name option { padding: 5px 10px; font-size: .88rem; }
+  #occ-scientific-name option[disabled] { color: var(--border); font-size: .6rem; padding: 0 8px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .readonly-field {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 11px 14px; font-size: 1rem; color: var(--accent); font-weight: 600;
+  }
+  .field-hint { font-size: .75rem; color: var(--text-dim); margin-top: 2px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 20px; border-radius: var(--radius-sm);
+    border: none; cursor: pointer; font-size: .95rem; font-weight: 600;
+    font-family: inherit; transition: opacity .15s, transform .1s;
+    min-height: 44px; -webkit-appearance: none;
+  }
+  .btn:active { opacity: .8; transform: scale(.98); }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-secondary { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-ghost { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+  .btn-sm { padding: 8px 14px; font-size: .85rem; min-height: 36px; }
+  .btn-full { width: 100%; }
+  .btn-icon { padding: 10px; min-height: 44px; min-width: 44px; }
+  .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* ── FAB ── */
+  #fab {
+    position: fixed; bottom: 74px; right: 20px;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--primary); color: #fff;
+    border: none; cursor: pointer; font-size: 1.8rem; font-weight: 300;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5);
+    transition: transform .15s, opacity .2s;
+    z-index: 100;
+  }
+  #fab:active { transform: scale(.93); }
+  #fab.hidden { opacity: 0; pointer-events: none; }
+
+  /* ── CARDS / LISTS ── */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+    cursor: pointer; transition: border-color .15s;
+    box-shadow: 0 1px 5px rgba(0,0,0,.06);
+  }
+  .card:active { border-color: var(--accent); }
+  .card-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .card-sub { font-size: .82rem; color: var(--text-dim); margin-top: 3px; }
+  .card-meta { font-size: .78rem; color: var(--accent-dim); margin-top: 4px; }
+  .card-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  /* Active site card */
+  .card.site-active { border: 2.5px solid var(--primary); background: #FFF8F0; box-shadow: 0 2px 8px rgba(74,55,40,.15); }
+  .site-edit-btn { font-size: .75rem; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); color: var(--primary); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+
+  /* ── SECTION HEADERS ── */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0 8px; margin-top: 4px;
+    cursor: pointer; user-select: none;
+  }
+  .section-title { font-size: .8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .08em; }
+  .section-chevron { color: var(--text-dim); transition: transform .25s; font-size: 1rem; }
+  .section-chevron.open { transform: rotate(90deg); }
+  .section-body { display: none; }
+  .section-body.open { display: block; }
+  .section-divider { border: none; border-top: 1px solid var(--border); margin: 4px 0 14px; }
+
+  /* ── CHIPS ── */
+  .chip-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .chip {
+    padding: 7px 14px; border-radius: 20px; font-size: .82rem; font-weight: 500;
+    border: 1.5px solid var(--border); background: var(--input-bg); color: var(--text-dim);
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chip.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  /* ── TOGGLE SELECTOR (Yes/No/Unknown) ── */
+  .toggle-group { display: flex; gap: 0; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+  .toggle-opt {
+    flex: 1; padding: 10px 6px; font-size: .85rem; font-weight: 500; text-align: center;
+    border: none; background: var(--input-bg); color: var(--text-dim); cursor: pointer;
+    transition: all .15s; border-right: 1px solid var(--border);
+  }
+  .toggle-opt:last-child { border-right: none; }
+  .toggle-opt.selected { background: var(--primary); color: #fff; }
+
+  /* ── CHECKBOX ── */
+  .check-group { display: flex; gap: 16px; }
+  .check-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: .95rem; }
+  .check-label input[type="checkbox"] {
+    width: 22px; height: 22px; accent-color: var(--accent);
+    border-radius: 4px; cursor: pointer;
+  }
+
+  /* ── COMPASS / GPS ROW ── */
+  .input-with-btn { display: flex; gap: 8px; }
+  .input-with-btn .form-input { flex: 1; }
+
+  /* ── RADIAL POINTS ── */
+  .radial-point {
+    background: var(--card2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px;
+  }
+  .radial-point-header { font-size: .8rem; font-weight: 700; color: var(--accent-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .06em; }
+
+  /* ── PHOTO GRID ── */
+  .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .photo-thumb {
+    position: relative; aspect-ratio: 1; border-radius: var(--radius-sm);
+    overflow: hidden; background: var(--card2); cursor: pointer;
+  }
+  .photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .photo-seq {
+    position: absolute; bottom: 4px; left: 4px;
+    background: rgba(0,0,0,.7); color: var(--accent); font-size: .65rem;
+    padding: 2px 5px; border-radius: 3px; font-weight: 700;
+  }
+  .photo-saved-badge {
+    position: absolute; bottom: 4px; right: 4px;
+    background: rgba(39,174,96,.85); color: #fff; font-size: .6rem;
+    font-weight: 900; padding: 2px 5px; border-radius: 3px; line-height: 1;
+  }
+  .photo-del {
+    position: absolute; top: 4px; right: 4px;
+    background: rgba(0,0,0,.7); color: #fff; border: none;
+    border-radius: 50%; width: 24px; height: 24px; font-size: .85rem;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .photo-actions { display: flex; gap: 10px; margin-top: 8px; }
+  /* Lightbox */
+  #lightbox {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,.92); flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox-img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 4px; }
+  #lightbox-bar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 16px; padding: 14px;
+    background: rgba(0,0,0,.5);
+  }
+  #lightbox-close {
+    position: absolute; top: 14px; right: 18px;
+    background: none; border: none; color: #fff; font-size: 2rem;
+    cursor: pointer; line-height: 1;
+  }
+
+  /* ── MISC ── */
+  .error-msg { color: var(--danger); font-size: .85rem; padding: 8px 12px; background: rgba(231,76,60,.1); border-radius: var(--radius-sm); border: 1px solid rgba(231,76,60,.3); }
+  .success-msg { color: var(--success); font-size: .85rem; padding: 8px 12px; background: rgba(46,204,113,.1); border-radius: var(--radius-sm); border: 1px solid rgba(46,204,113,.3); }
+  .info-msg { color: var(--accent); font-size: .85rem; padding: 8px 12px; background: rgba(196,168,130,.1); border-radius: var(--radius-sm); border: 1px solid rgba(196,168,130,.3); }
+  .empty-state { text-align: center; color: var(--text-dim); padding: 48px 16px; }
+  .empty-state .empty-icon { font-size: 3rem; margin-bottom: 12px; }
+  .empty-state p { font-size: .9rem; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .badge-admin { background: rgba(231,76,60,.2); color: var(--danger); }
+  .badge-manager { background: rgba(196,168,130,.2); color: var(--accent); }
+  .badge-collector { background: rgba(46,204,113,.15); color: var(--success); }
+  .page-title { font-size: 1.2rem; font-weight: 800; color: var(--primary); margin-bottom: 16px; }
+  /* ── SITES WATERMARK ── */
+  #sites-watermark { display: flex; justify-content: center; padding: 8px 0 16px; pointer-events: none; }
+  #sites-watermark img { width: 240px; height: 240px; opacity: 0.07; border-radius: 16px; }
+  .sub-title { font-size: .85rem; color: var(--text-dim); margin-bottom: 14px; }
+  .back-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: none; color: var(--primary); font-size: .9rem;
+    padding: 6px 0; cursor: pointer; margin-bottom: 14px; font-family: inherit;
+  }
+  .back-btn svg { width: 16px; height: 16px; }
+  .form-section { margin-bottom: 4px; }
+  .gps-coords { font-size: .78rem; color: var(--text-dim); margin-top: 4px; font-family: monospace; }
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,.3); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-overlay {
+    position: fixed; inset: 0; background: rgba(26,23,20,.8);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9998; gap: 12px; font-size: .9rem; color: var(--accent);
+  }
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .filter-bar .form-select { flex: 1; }
+  .coord-display {
+    background: var(--card2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    font-family: monospace; font-size: .82rem; color: var(--text-dim);
+    margin-top: 6px;
+  }
+  hr.section-divider { border: none; border-top: 1px solid var(--border); margin: 8px 0 16px; }
+  .custody-list { display: flex; flex-direction: column; gap: 8px; }
+  .custody-item {
+    background: var(--card2); border-radius: var(--radius-sm); padding: 10px 12px;
+    font-size: .82rem;
+  }
+  .custody-item .event-type { color: var(--primary); font-weight: 700; text-transform: uppercase; font-size: .75rem; letter-spacing: .06em; }
+  .custody-item .event-meta { color: var(--text-dim); margin-top: 2px; }
+  .settings-section { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+  .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .settings-row:last-child { border-bottom: none; }
+  .settings-label { font-size: .9rem; color: var(--text-dim); }
+  .settings-value { font-size: .9rem; color: var(--text); font-weight: 500; }
+  .toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: var(--card2); color: var(--text); padding: 10px 20px;
+    border-radius: 20px; font-size: .88rem; font-weight: 500;
+    box-shadow: 0 4px 20px rgba(0,0,0,.5); z-index: 9997;
+    animation: toastIn .25s ease, toastOut .3s ease 2s forwards;
+    white-space: nowrap;
+  }
+  @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+  @keyframes toastOut { to { opacity:0; transform:translateX(-50%) translateY(10px); } }
+  .form-actions { display: flex; gap: 10px; margin-top: 20px; padding-bottom: 20px; }
+  .form-actions .btn { flex: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- SPLASH -->
+  <div id="splash">
+    <img src="WDC_fieldApp.png" alt="WDC Field App" onerror="this.style.display='none'">
+    <div class="splash-title">WDC FIELD APP</div>
+    <div class="splash-sub">Wyoming Dinosaur Center</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- LOGIN VIEW (shown outside main app structure when not authed) -->
+  <div id="login-view">
+    <img src="WDC_fieldApp.png" alt="WDC" class="login-logo" onerror="this.style.display='none'">
+    <div class="login-title">WDC Field App</div>
+    <div class="login-sub">Wyoming Dinosaur Center</div>
+    <div class="login-form">
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" id="login-email" class="form-input" placeholder="you@example.com" autocomplete="email" inputmode="email">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" id="login-password" class="form-input" placeholder="••••••••" autocomplete="current-password">
+      </div>
+      <div id="login-error" style="display:none;" class="error-msg"></div>
+      <button class="btn btn-primary btn-full" onclick="signIn()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign In
+      </button>
+    </div>
+  </div>
+
+  <!-- MAIN APP (shown when authed) -->
+  <header id="header" style="display:none;">
+    <span id="header-title">WDC Field</span>
+    <div id="online-badge" title="Connection status"></div>
+    <span id="header-user"></span>
+  </header>
+
+  <div id="main-content" style="display:none;">
+
+    <!-- SITES VIEW -->
+    <div id="view-sites" class="view active">
+      <div class="page-title">Field Sites</div>
+      <div id="sites-watermark"><img src="WDC_fieldApp.png" alt=""></div>
+      <div id="sites-list"></div>
+    </div>
+
+    <!-- SPECIMENS VIEW -->
+    <div id="view-specimens" class="view">
+      <div class="page-title" id="specimens-page-title">Specimens</div>
+      <div id="specimens-list"></div>
+    </div>
+
+    <!-- SETTINGS VIEW -->
+    <div id="view-settings" class="view">
+      <div class="page-title">Settings</div>
+      <div class="settings-section">
+        <div class="settings-row">
+          <span class="settings-label">Name</span>
+          <span class="settings-value" id="settings-name">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Email</span>
+          <span class="settings-value" id="settings-email" style="font-size:.8rem;">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Role</span>
+          <span id="settings-role"></span>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-row">
+          <span class="settings-label">Offline Queue</span>
+          <span class="settings-value" id="settings-queue">0 items</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Photos Pending</span>
+          <span class="settings-value" id="settings-photos">0 photos</span>
+        </div>
+      </div>
+      <button class="btn btn-secondary btn-full" style="margin-bottom:10px;" onclick="manualSync()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        Sync Now
+      </button>
+      <button class="btn btn-danger btn-full" onclick="signOut()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign Out
+      </button>
+    </div>
+
+    <!-- LOCATION FORM VIEW -->
+    <div id="view-location-form" class="view">
+      <button class="back-btn" onclick="showView('sites')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to Sites
+      </button>
+      <div class="page-title" id="loc-form-title">New Site</div>
+      <div id="loc-form-error" style="display:none;" class="error-msg"></div>
+
+      <div class="form-group"><label class="form-label">Site Code *</label>
+        <input type="text" id="loc-site-code" class="form-input" placeholder="e.g. ABC" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div class="form-group" style="margin-top:12px;"><label class="form-label">Site Name</label>
+        <input type="text" id="loc-site-name" class="form-input" placeholder="Descriptive site name">
+      </div>
+      <div class="form-group" style="margin-top:12px;"><label class="form-label">Verbatim Locality</label>
+        <input type="text" id="loc-verbatim" class="form-input" placeholder="e.g. NW slope, section 12, T45N R87W">
+      </div>
+      <div class="form-row" style="margin-top:12px;">
+        <div class="form-group"><label class="form-label">Marker 1 Label</label>
+          <input type="text" id="loc-m1-label" class="form-input" placeholder="e.g. N">
+        </div>
+        <div class="form-group"><label class="form-label">Marker 2 Label</label>
+          <input type="text" id="loc-m2-label" class="form-input" placeholder="e.g. S">
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:12px;"><label class="form-label">Remarks</label>
+        <textarea id="loc-remarks" class="form-textarea" placeholder="Additional notes about this site..."></textarea>
+      </div>
+
+      <div class="form-row" style="margin-top:12px;">
+        <div class="form-group">
+          <label class="form-label">Formation</label>
+          <select id="loc-formation" class="form-select" onchange="onLocFormationChange()">
+            <option value="">— select —</option>
+            <option value="Morrison">Morrison</option>
+            <option value="Lance">Lance</option>
+            <option value="Hell Creek">Hell Creek</option>
+            <option value="Cloverly">Cloverly</option>
+            <option value="Frontier">Frontier</option>
+            <option value="Mowry">Mowry</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Epoch</label>
+          <select id="loc-epoch" class="form-select">
+            <option value="">— select formation —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:12px;">
+        <label class="form-label">GPS Coordinates</label>
+        <button class="btn btn-secondary btn-full" onclick="captureGPSForLocation()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></svg>
+          Capture Current GPS
+        </button>
+        <div id="loc-gps-display" class="coord-display" style="display:none;"></div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="showView('sites')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveLocation()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Site
+        </button>
+      </div>
+      <div id="delete-site-row" style="display:none;margin-top:8px;">
+        <button class="btn btn-danger btn-full" id="delete-site-btn" onclick="deleteSite()">Delete Site</button>
+      </div>
+    </div>
+
+    <!-- OCCURRENCE FORM VIEW -->
+    <div id="view-occurrence-form" class="view">
+      <button class="back-btn" onclick="showView('specimens')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to Specimens
+      </button>
+      <div class="page-title" id="occ-form-title">New Specimen</div>
+      <div id="occ-form-error" style="display:none;" class="error-msg"></div>
+      <div id="occ-form-success" style="display:none;" class="success-msg"></div>
+
+      <!-- IDENTITY -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('identity')">
+          <span class="section-title">Identity</span>
+          <span class="section-chevron open" id="chevron-identity">›</span>
+        </div>
+        <div class="section-body open" id="body-identity">
+          <div class="form-group">
+            <label class="form-label">Catalog Number</label>
+            <div class="readonly-field" id="occ-catalog-display">— select a site first —</div>
+          </div>
+          <input type="hidden" id="occ-catalog-number">
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- DISCOVERY -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('discovery')">
+          <span class="section-title">Discovery</span>
+          <span class="section-chevron open" id="chevron-discovery">›</span>
+        </div>
+        <div class="section-body open" id="body-discovery">
+          <input type="hidden" id="occ-location-id">
+          <div class="form-group">
+            <label class="form-label">Site</label>
+            <div class="readonly-field" id="occ-site-display">—</div>
+          </div>
+          <div class="form-row" style="margin-top:12px;">
+            <div class="form-group">
+              <label class="form-label">Event Date</label>
+              <input type="date" id="occ-event-date" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Recorded By</label>
+              <input type="text" id="occ-recorded-by" class="form-input" placeholder="Collector name">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Intern / Staff</label>
+            <input type="text" id="occ-intern-staff" class="form-input" placeholder="Additional staff present">
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- GEOLOGIC CONTEXT -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('geologic')">
+          <span class="section-title">Geologic Context</span>
+          <span class="section-chevron open" id="chevron-geologic">›</span>
+        </div>
+        <div class="section-body open" id="body-geologic">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Formation</label>
+              <select id="occ-formation" class="form-select" onchange="onFormationChange()">
+                <option value="">— select —</option>
+                <option value="Morrison">Morrison</option>
+                <option value="Lance">Lance</option>
+                <option value="Hell Creek">Hell Creek</option>
+                <option value="Cloverly">Cloverly</option>
+                <option value="Frontier">Frontier</option>
+                <option value="Mowry">Mowry</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Epoch</label>
+              <select id="occ-epoch" class="form-select" onchange="onEpochChange()">
+                <option value="">— select formation —</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:12px;">
+            <div class="form-group">
+              <label class="form-label">Member</label>
+              <input type="text" id="occ-member" class="form-input" placeholder="e.g. Brushy Basin">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Bed</label>
+              <input type="text" id="occ-bed" class="form-input" placeholder="Bed designation">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Lithologic Description</label>
+            <textarea id="occ-litho" class="form-textarea" placeholder="Describe the lithology at point of discovery..."></textarea>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- IDENTIFICATION -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('identification')">
+          <span class="section-title">Identification</span>
+          <span class="section-chevron" id="chevron-identification">›</span>
+        </div>
+        <div class="section-body" id="body-identification">
+          <div class="form-group">
+            <label class="form-label">Scientific Name</label>
+            <select id="occ-scientific-name" class="form-select" onchange="onTaxonChange()">
+              <option value="">— select formation + epoch first —</option>
+            </select>
+            <input type="text" id="occ-taxon-other" class="form-input" placeholder="Enter scientific name…" style="display:none;margin-top:8px;">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Verbatim Element</label>
+            <select id="occ-verbatim-element" class="form-select" onchange="onElementChange()">
+              <option value="">— select —</option>
+              <option>Atlas</option><option>Axis</option><option>Astragalus</option>
+              <option>Calcaneum</option><option>Carpal</option>
+              <option>Caudal vertebra</option><option>Cervical vertebra</option>
+              <option>Chevron</option><option>Coracoid</option><option>Cranium</option>
+              <option>Dorsal vertebra</option><option>Femur</option><option>Fibula</option>
+              <option>Frontal</option><option>Gastralia</option><option>Humerus</option>
+              <option>Ilium</option><option>Ischium</option><option>Jugal</option>
+              <option>Lacrimal</option><option>Mandible</option>
+              <option>Manual phalanx</option><option>Manual ungual</option>
+              <option>Maxilla</option><option>Metacarpal</option><option>Metatarsal</option>
+              <option>Nasal</option><option>Osteoderm</option><option>Parietal</option>
+              <option>Pedal phalanx</option><option>Pedal ungual</option>
+              <option>Premaxilla</option><option>Pubis</option><option>Quadrate</option>
+              <option>Radius</option><option>Rib</option>
+              <option>Sacral vertebra</option><option>Scapula</option>
+              <option>Squamosal</option><option>Sternal plate</option>
+              <option>Tarsal</option><option>Teeth</option><option>Tibia</option>
+              <option>Ulna</option><option>Indeterminate</option><option>Other</option>
+            </select>
+            <input type="text" id="occ-element-other" class="form-input" placeholder="Describe element…" style="display:none;margin-top:8px;">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Element Side</label>
+            <div class="check-group">
+              <label class="check-label"><input type="checkbox" id="occ-side-l"> Left</label>
+              <label class="check-label"><input type="checkbox" id="occ-side-r"> Right</label>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Element Remarks</label>
+            <input type="text" id="occ-element-remarks" class="form-input" placeholder="Additional element notes">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">In Situ</label>
+            <div class="toggle-group" id="occ-in-situ">
+              <button class="toggle-opt" data-val="Yes" onclick="setToggle('occ-in-situ','Yes')">Yes</button>
+              <button class="toggle-opt" data-val="No" onclick="setToggle('occ-in-situ','No')">No</button>
+              <button class="toggle-opt selected" data-val="Unknown" onclick="setToggle('occ-in-situ','Unknown')">Unknown</button>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Approx Position Known</label>
+            <div class="toggle-group" id="occ-pos-known">
+              <button class="toggle-opt selected" data-val="Yes" onclick="setToggle('occ-pos-known','Yes')">Yes</button>
+              <button class="toggle-opt" data-val="No" onclick="setToggle('occ-pos-known','No')">No</button>
+            </div>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- CONDITION -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('condition')">
+          <span class="section-title">Condition</span>
+          <span class="section-chevron" id="chevron-condition">›</span>
+        </div>
+        <div class="section-body" id="body-condition">
+          <div class="form-group">
+            <label class="form-label">Pre-Depositional % Complete</label>
+            <select id="occ-pre-dep-pct" class="form-select">
+              <option value="">—</option>
+              <option>0%</option><option>5%</option><option>10%</option><option>15%</option><option>20%</option>
+              <option>25%</option><option>30%</option><option>35%</option><option>40%</option><option>45%</option>
+              <option>50%</option><option>55%</option><option>60%</option><option>65%</option><option>70%</option>
+              <option>75%</option><option>80%</option><option>85%</option><option>90%</option><option>95%</option>
+              <option>100%</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">% Lost During Excavation</label>
+            <select id="occ-bone-missing" class="form-select">
+              <option value="">—</option>
+              <option>0%</option><option>5%</option><option>10%</option><option>15%</option><option>20%</option>
+              <option>25%</option><option>30%</option><option>35%</option><option>40%</option><option>45%</option>
+              <option>50%</option><option>55%</option><option>60%</option><option>65%</option><option>70%</option>
+              <option>75%</option><option>80%</option><option>85%</option><option>90%</option><option>95%</option>
+              <option>100%</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Pre-Depositional Condition</label>
+            <div class="chip-group" id="chips-pre-dep"></div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Current Condition</label>
+            <div class="chip-group" id="chips-current-cond"></div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Chemicals Applied</label>
+            <div class="chip-group" id="chips-chemicals"></div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Preparations / Packaging</label>
+            <div class="chip-group" id="chips-preparations"></div>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- ORIENTATION & MEASUREMENTS -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('orientation')">
+          <span class="section-title">Orientation &amp; Measurements</span>
+          <span class="section-chevron" id="chevron-orientation">›</span>
+        </div>
+        <div class="section-body" id="body-orientation">
+          <div class="form-group">
+            <label class="form-label">Orientation (degrees, 0–360)</label>
+            <div class="input-with-btn">
+              <input type="number" id="occ-orientation" class="form-input" placeholder="0" min="0" max="360" inputmode="numeric">
+              <button class="btn btn-secondary btn-icon" onclick="captureCompassHeading()" title="Capture compass heading">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Plunge (degrees, signed)</label>
+            <div class="input-with-btn">
+              <input type="number" id="occ-plunge" class="form-input" placeholder="0" inputmode="numeric">
+              <button class="btn btn-secondary btn-icon" onclick="capturePlunge()" title="Capture plunge from device">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:12px;">
+            <div class="form-group">
+              <label class="form-label">Max Length (cm)</label>
+              <input type="number" id="occ-max-length" class="form-input" placeholder="0.0" inputmode="decimal" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mid Width (cm)</label>
+              <input type="number" id="occ-mid-width" class="form-input" placeholder="0.0" inputmode="decimal" step="0.1">
+            </div>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- RADIAL MAP POINTS -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('radial')">
+          <span class="section-title">Radial Map Points</span>
+          <span class="section-chevron" id="chevron-radial">›</span>
+        </div>
+        <div class="section-body" id="body-radial">
+          <div id="radial-points-container"></div>
+          <button class="btn btn-ghost btn-sm" onclick="addRadialPoint()" id="radial-add-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Add Point
+          </button>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- ASSOCIATIONS & NOTES -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('assoc')">
+          <span class="section-title">Associations &amp; Notes</span>
+          <span class="section-chevron" id="chevron-assoc">›</span>
+        </div>
+        <div class="section-body" id="body-assoc">
+          <div class="form-group">
+            <label class="form-label">Associated Occurrences</label>
+            <input type="text" id="occ-associated" class="form-input" placeholder="Comma-separated catalog numbers">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Occurrence Remarks</label>
+            <textarea id="occ-remarks" class="form-textarea" placeholder="General field notes..."></textarea>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- GPS -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('gps')">
+          <span class="section-title">GPS Location</span>
+          <span class="section-chevron" id="chevron-gps">›</span>
+        </div>
+        <div class="section-body" id="body-gps">
+          <button class="btn btn-secondary btn-full" onclick="captureGPSForOccurrence()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></svg>
+            Capture Current GPS
+          </button>
+          <div id="occ-gps-display" class="coord-display" style="display:none;"></div>
+          <input type="hidden" id="occ-lat">
+          <input type="hidden" id="occ-lng">
+          <input type="hidden" id="occ-verbatim-coords">
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- MAPPING -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('mapping')">
+          <span class="section-title">Mapping</span>
+          <span class="section-chevron" id="chevron-mapping">›</span>
+        </div>
+        <div class="section-body" id="body-mapping">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Date Mapped</label>
+              <input type="date" id="occ-date-mapped" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Mapped By</label>
+              <input type="text" id="occ-mapped-by" class="form-input" placeholder="Name">
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:12px;">
+            <div class="form-group">
+              <label class="form-label">Physical Map Date</label>
+              <input type="date" id="occ-physical-map-date" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Placed on Map By</label>
+              <input type="text" id="occ-placed-on-map-by" class="form-input" placeholder="Name">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Ready for Removal</label>
+            <div class="toggle-group" id="occ-ready-removal">
+              <button class="toggle-opt" data-val="Yes" onclick="setToggle('occ-ready-removal','Yes')">Yes</button>
+              <button class="toggle-opt selected" data-val="No" onclick="setToggle('occ-ready-removal','No')">No</button>
+            </div>
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- COLLECTION & REMOVAL -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('collection')">
+          <span class="section-title">Collection &amp; Removal</span>
+          <span class="section-chevron" id="chevron-collection">›</span>
+        </div>
+        <div class="section-body" id="body-collection">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Date Collected</label>
+              <input type="date" id="occ-date-collected" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Collected By</label>
+              <input type="text" id="occ-collected-by" class="form-input" placeholder="Name">
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="check-label">
+              <input type="checkbox" id="occ-partially-removed">
+              Partially Removed
+            </label>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Removal Method</label>
+            <input type="text" id="occ-removal-method" class="form-input" placeholder="e.g. Plaster jacket, hand extraction">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Temp Storage Location</label>
+            <input type="text" id="occ-temp-storage" class="form-input" placeholder="e.g. Lab shelf B-3">
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Staff Signature</label>
+            <input type="text" id="occ-staff-signature" class="form-input" placeholder="Initials or full name">
+          </div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- PHOTOS -->
+      <div class="form-section">
+        <div class="section-header" onclick="toggleSection('photos')">
+          <span class="section-title">Photos</span>
+          <span class="section-chevron" id="chevron-photos">›</span>
+        </div>
+        <div class="section-body" id="body-photos">
+          <div class="photo-actions">
+            <button class="btn btn-secondary" style="flex:1;" onclick="capturePhoto(true)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Camera
+            </button>
+            <button class="btn btn-secondary" style="flex:1;" onclick="capturePhoto(false)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              Gallery
+            </button>
+          </div>
+          <input type="file" id="photo-input" accept="image/*" style="display:none;" onchange="handlePhotoSelected(event)">
+          <div class="photo-grid" id="photo-grid"></div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <!-- CHAIN OF CUSTODY -->
+      <div class="form-section" id="custody-section" style="display:none;">
+        <div class="section-header" onclick="toggleSection('custody')">
+          <span class="section-title">Chain of Custody</span>
+          <span class="section-chevron" id="chevron-custody">›</span>
+        </div>
+        <div class="section-body" id="body-custody">
+          <div class="custody-list" id="custody-list"></div>
+        </div>
+        <hr class="section-divider">
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="showView('specimens')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveOccurrence()" id="save-occ-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Specimen
+        </button>
+      </div>
+    </div><!-- end occurrence form view -->
+
+  </div><!-- end main-content -->
+
+  <!-- BOTTOM NAV -->
+  <nav id="bottom-nav" style="display:none;">
+    <button class="nav-tab active" id="tab-sites" onclick="switchTab('sites')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Sites
+    </button>
+    <button class="nav-tab" id="tab-specimens" onclick="switchTab('specimens')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Specimens
+    </button>
+    <button class="nav-tab" id="tab-settings" onclick="switchTab('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      Settings
+    </button>
+  </nav>
+
+  <!-- FAB -->
+  <button id="fab" class="hidden" onclick="handleFAB()">+</button>
+
+</div><!-- end app -->
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  SUPABASE INIT
+// ════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://xgvulkoqtqvgyprggvay.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhndnVsa29xdHF2Z3lwcmdndmF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0MjEwNTUsImV4cCI6MjA5Nzk5NzA1NX0.-918Ro2JqRI251SgZPpMmpi0gfxrM6jUSGuXz7tBYVE';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ════════════════════════════════════════════════════════════
+//  APP STATE
+// ════════════════════════════════════════════════════════════
+let currentUser = null;
+let currentProfile = null;
+let currentTab = 'sites';
+let locationsCache = [];
+let activeSiteId = null;
+let editingLocationId = null;
+let editingOccurrenceId = null;
+let currentLocationGPS = null;
+let currentOccurrenceGPS = null;
+let compassPermissionGranted = false;
+let pendingPhotos = []; // [{dataUrl, filename, file}]
+let radialPointCount = 0;
+let lastSupabaseOk = true; // tracks whether last Supabase call succeeded
+
+// ════════════════════════════════════════════════════════════
+//  OFFLINE QUEUE
+// ════════════════════════════════════════════════════════════
+const QUEUE_KEY = 'wdc_offline_queue';
+const IDBNAME = 'wdc-field-photos';
+const NETWORK_TIMEOUT_MS = 8000; // fall back to local data after 8s
+
+// Race a Supabase promise against a timeout; resolves to {data,error} either way
+// Updates lastSupabaseOk so the badge reflects actual connectivity
+function withTimeout(supabasePromise, ms = NETWORK_TIMEOUT_MS) {
+  return Promise.race([
+    supabasePromise,
+    new Promise(resolve => setTimeout(() => resolve({ data: null, error: { message: 'timeout', isTimeout: true } }), ms))
+  ]).then(result => {
+    if (result?.error?.isTimeout) {
+      lastSupabaseOk = false;
+    } else if (!result?.error) {
+      lastSupabaseOk = true;
+    }
+    updateOnlineBadge();
+    return result;
+  });
+}
+
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
+}
+function setQueue(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
+function enqueue(item) {
+  const q = getQueue();
+  const existing = q.findIndex(x => x.localId === item.localId);
+  if (existing >= 0) { q[existing] = item; } else { q.push(item); }
+  setQueue(q);
+}
+function dequeue(localId) {
+  const q = getQueue().filter(x => x.localId !== localId);
+  setQueue(q);
+}
+
+// IndexedDB for photos
+function openPhotoDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDBNAME, 1);
+    req.onupgradeneeded = e => {
+      e.target.result.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function storePhotoIDB(data) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('photos', 'readwrite');
+    const req = tx.objectStore('photos').add(data);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function getPhotoIDB(id) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('photos', 'readonly');
+    const req = tx.objectStore('photos').get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function deletePhotoIDB(id) {
+  const db = await openPhotoDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('photos', 'readwrite');
+    tx.objectStore('photos').delete(id);
+    tx.oncomplete = () => resolve();
+  });
+}
+async function getAllPhotosIDB() {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('photos', 'readonly');
+    const req = tx.objectStore('photos').getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  ONLINE STATUS
+// ════════════════════════════════════════════════════════════
+function updateOnlineBadge() {
+  const badge = document.getElementById('online-badge');
+  if (navigator.onLine && lastSupabaseOk) {
+    badge.className = 'online';
+    badge.title = 'Connected';
+  } else {
+    badge.className = '';
+    badge.title = navigator.onLine ? 'Supabase unreachable' : 'Offline';
+  }
+  updateSettingsQueue();
+}
+window.addEventListener('online', () => { updateOnlineBadge(); manualSync(); });
+window.addEventListener('offline', updateOnlineBadge);
+
+// ════════════════════════════════════════════════════════════
+//  HELPERS
+// ════════════════════════════════════════════════════════════
+function genUUID() {
+  return crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);
+  });
+}
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+function todayStr() {
+  return new Date().toISOString().slice(0,10);
+}
+function pad3(n) { return String(n).padStart(3,'0'); }
+function showToast(msg, dur=2300) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), dur+300);
+}
+function showLoading(msg='Loading…') {
+  let el = document.getElementById('loading-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'loading-overlay';
+    el.className = 'loading-overlay';
+    el.innerHTML = `<div class="spinner"></div><span>${msg}</span>`;
+    document.body.appendChild(el);
+  } else {
+    el.querySelector('span').textContent = msg;
+    el.style.display = 'flex';
+  }
+}
+function hideLoading() {
+  const el = document.getElementById('loading-overlay');
+  if (el) el.style.display = 'none';
+}
+
+// ════════════════════════════════════════════════════════════
+//  AUTH
+// ════════════════════════════════════════════════════════════
+async function signIn() {
+  const email = document.getElementById('login-email').value.trim();
+  const pwd = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if (!email || !pwd) { errEl.textContent = 'Email and password are required.'; errEl.style.display = 'block'; return; }
+  showLoading('Signing in…');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
+  hideLoading();
+  if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+  await onAuthSuccess(data.user);
+}
+
+async function signOut() {
+  await sb.auth.signOut();
+  currentUser = null; currentProfile = null;
+  showLoginView();
+}
+
+async function onAuthSuccess(user) {
+  currentUser = user;
+  await loadProfile(user.id);
+  showAppView();
+  await loadLocationsCache();
+  await loadOccurrences();
+  updateOnlineBadge();
+}
+
+async function loadProfile(userId) {
+  const { data } = await sb.from('profiles').select('*').eq('id', userId).single();
+  currentProfile = data || { full_name: currentUser.email, email: currentUser.email, role: 'collector' };
+  document.getElementById('header-user').textContent = currentProfile.full_name || currentProfile.email;
+  document.getElementById('settings-name').textContent = currentProfile.full_name || '—';
+  document.getElementById('settings-email').textContent = currentProfile.email || currentUser.email;
+  const roleBadge = document.getElementById('settings-role');
+  const role = currentProfile.role || 'collector';
+  roleBadge.innerHTML = `<span class="badge badge-${role}">${role}</span>`;
+}
+
+// ════════════════════════════════════════════════════════════
+//  VIEW ROUTING
+// ════════════════════════════════════════════════════════════
+function showLoginView() {
+  document.getElementById('login-view').classList.add('active');
+  document.getElementById('header').style.display = 'none';
+  document.getElementById('main-content').style.display = 'none';
+  document.getElementById('bottom-nav').style.display = 'none';
+  document.getElementById('fab').classList.add('hidden');
+}
+
+function showAppView() {
+  document.getElementById('login-view').classList.remove('active');
+  document.getElementById('header').style.display = 'flex';
+  document.getElementById('main-content').style.display = 'block';
+  document.getElementById('bottom-nav').style.display = 'flex';
+  switchTab('sites');
+}
+
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(`view-${name}`).classList.add('active');
+  document.getElementById('main-content').scrollTop = 0;
+  const fab = document.getElementById('fab');
+  if (name === 'sites' || name === 'specimens') {
+    fab.classList.remove('hidden');
+    currentTab = name === 'sites' ? 'sites' : 'specimens';
+    updateTabHighlight();
+  } else {
+    fab.classList.add('hidden');
+  }
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  updateTabHighlight();
+  if (tab === 'settings') {
+    updateSettingsQueue();
+    document.getElementById('fab').classList.add('hidden');
+    showView('settings');
+  } else {
+    document.getElementById('fab').classList.remove('hidden');
+    showView(tab === 'sites' ? 'sites' : 'specimens');
+    if (tab === 'specimens') loadOccurrences();
+  }
+}
+
+function updateTabHighlight() {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  const tabEl = document.getElementById(`tab-${currentTab}`);
+  if (tabEl) tabEl.classList.add('active');
+}
+
+function handleFAB() {
+  if (currentTab === 'sites') openLocationForm(null);
+  else if (currentTab === 'specimens') openOccurrenceForm(null);
+}
+
+// ════════════════════════════════════════════════════════════
+//  SECTION TOGGLES
+// ════════════════════════════════════════════════════════════
+function toggleSection(id) {
+  const body = document.getElementById(`body-${id}`);
+  const chev = document.getElementById(`chevron-${id}`);
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  chev.classList.toggle('open', !isOpen);
+}
+
+// ════════════════════════════════════════════════════════════
+//  TOGGLE GROUPS
+// ════════════════════════════════════════════════════════════
+function setToggle(groupId, val) {
+  const group = document.getElementById(groupId);
+  group.querySelectorAll('.toggle-opt').forEach(btn => {
+    btn.classList.toggle('selected', btn.dataset.val === val);
+  });
+}
+function getToggle(groupId) {
+  const group = document.getElementById(groupId);
+  const sel = group.querySelector('.toggle-opt.selected');
+  return sel ? sel.dataset.val : null;
+}
+
+// ════════════════════════════════════════════════════════════
+//  CHIP GROUPS
+// ════════════════════════════════════════════════════════════
+const CONDITION_OPTIONS = ['Unbroken','Broken','Shattered','Weathered','Abraded','Eroded','Distorted','Compressed','Encrusted','Oxidized','Pyritized','Pathologic','Other'];
+const CHEMICALS_OPTIONS = ['None','Thin Cyano','Thick Cyano','Accelerator','Paraloid B-72','Acetone'];
+const PREP_OPTIONS = ['Plaster','Foam','Tissue','Vinac','Butvar','Other'];
+
+// ── Paleontological reference data ──────────────────────────
+const PALEO_DATA = {
+  Morrison: {
+    epochs: ['Late Jurassic'],
+    'Late Jurassic': ['Allosaurus fragilis','Apatosaurus ajax','Apatosaurus louisae','Barosaurus lentus',
+      'Brachiosaurus altithorax','Brontosaurus excelsus','Camarasaurus grandis','Camarasaurus lentus',
+      'Camptosaurus dispar','Ceratosaurus nasicornis','Diplodocus carnegii','Diplodocus hallorum',
+      'Dryosaurus altus','Gargoyleosaurus parkpinorum','Haplocanthosaurus delfsi',
+      'Marshosaurus bicentesimus','Mymoorapelta maysi','Stegosaurus stenops','Stegosaurus ungulatus',
+      'Stokesosaurus clevelandi','Supersaurus vivianae','Torvosaurus tanneri','Indeterminate','Other']
+  },
+  Lance: {
+    epochs: ['Late Cretaceous'],
+    'Late Cretaceous': ['Tyrannosaurus rex','Triceratops horridus','Edmontosaurus annectens',
+      'Pachycephalosaurus wyomingensis','Ankylosaurus magniventris','Thescelosaurus neglectus',
+      'Indeterminate','Other']
+  },
+  'Hell Creek': {
+    epochs: ['Late Cretaceous'],
+    'Late Cretaceous': ['Tyrannosaurus rex','Triceratops horridus','Triceratops prorsus',
+      'Edmontosaurus regalis','Ankylosaurus magniventris','Pachycephalosaurus wyomingensis',
+      'Indeterminate','Other']
+  },
+  Cloverly: {
+    epochs: ['Early Cretaceous'],
+    'Early Cretaceous': ['Tenontosaurus tilletti','Deinonychus antirrhopus',
+      'Sauroposeidon proteles','Acrocanthosaurus atokensis','Indeterminate','Other']
+  },
+  Frontier: { epochs: ['Late Cretaceous'], 'Late Cretaceous': ['Indeterminate','Other'] },
+  Mowry:    { epochs: ['Early Cretaceous'], 'Early Cretaceous': ['Indeterminate','Other'] },
+  Other:    { epochs: ['Other'], 'Other': ['Indeterminate','Other'] }
+};
+
+function onFormationChange() {
+  const formation = document.getElementById('occ-formation').value;
+  const epochSel = document.getElementById('occ-epoch');
+  const fd = PALEO_DATA[formation];
+  if (fd) {
+    epochSel.innerHTML = '<option value="">— select —</option>' +
+      fd.epochs.map(e => `<option value="${e}">${e}</option>`).join('');
+    if (fd.epochs.length === 1) { epochSel.value = fd.epochs[0]; onEpochChange(); }
+  } else {
+    epochSel.innerHTML = '<option value="">— select formation —</option>';
+    resetTaxaSelect();
+  }
+}
+
+function onLocFormationChange() {
+  const formation = document.getElementById('loc-formation').value;
+  const epochSel = document.getElementById('loc-epoch');
+  const fd = PALEO_DATA[formation];
+  if (fd) {
+    epochSel.innerHTML = '<option value="">— select —</option>' +
+      fd.epochs.map(e => `<option value="${e}">${e}</option>`).join('');
+    if (fd.epochs.length === 1) epochSel.value = fd.epochs[0];
+  } else {
+    epochSel.innerHTML = '<option value="">— select formation —</option>';
+  }
+}
+
+// Build the scientific name select — site's known taxa at top, separator, full list below
+function buildTaxonOptions(formation, epoch, siteTaxa) {
+  const allTaxa = PALEO_DATA[formation]?.[epoch] || [];
+  const sel = document.getElementById('occ-scientific-name');
+  const cur = sel.value;
+  const siteKnown = (siteTaxa || []).filter(t => t && t !== 'Indeterminate' && t !== 'Other');
+
+  let html = '';
+  if (siteKnown.length > 0) {
+    html += siteKnown.map(t => `<option value="${t}">${t}</option>`).join('');
+    if (allTaxa.length > 0) {
+      html += `<option disabled>─────────</option>`;
+    }
+  }
+  html += allTaxa.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  sel.innerHTML = html || '<option value="">— select formation + epoch first —</option>';
+  // Restore prior selection if still present
+  if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
+  document.getElementById('occ-taxon-other').style.display = 'none';
+}
+
+function onEpochChange() {
+  const formation = document.getElementById('occ-formation').value;
+  const epoch = document.getElementById('occ-epoch').value;
+  const activeLoc = locationsCache.find(l => l.id === activeSiteId);
+  buildTaxonOptions(formation, epoch, activeLoc?.associated_taxa || []);
+}
+
+function resetTaxaSelect() {
+  document.getElementById('occ-scientific-name').innerHTML = '<option value="" disabled selected>— select formation + epoch first —</option>';
+  document.getElementById('occ-taxon-other').style.display = 'none';
+}
+
+function onTaxonChange() {
+  const val = document.getElementById('occ-scientific-name').value;
+  document.getElementById('occ-taxon-other').style.display = val === 'Other' ? 'block' : 'none';
+}
+
+function onElementChange() {
+  const val = document.getElementById('occ-verbatim-element').value;
+  document.getElementById('occ-element-other').style.display = val === 'Other' ? 'block' : 'none';
+}
+
+// Set a select value, falling back to 'Other' + populating other-input if not found
+function setSelectOrOther(selectId, otherId, value) {
+  if (!value) return;
+  const sel = document.getElementById(selectId);
+  const opts = Array.from(sel.options).map(o => o.value);
+  if (opts.includes(value)) {
+    sel.value = value;
+  } else {
+    sel.value = 'Other';
+    const other = document.getElementById(otherId);
+    other.value = value;
+    other.style.display = 'block';
+  }
+}
+
+function buildChips(containerId, options, selected=[]) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  options.forEach(opt => {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (selected.includes(opt) ? ' selected' : '');
+    chip.textContent = opt;
+    chip.onclick = () => chip.classList.toggle('selected');
+    container.appendChild(chip);
+  });
+}
+function getChips(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} .chip.selected`)).map(c => c.textContent);
+}
+
+// ════════════════════════════════════════════════════════════
+//  LOCATIONS
+// ════════════════════════════════════════════════════════════
+async function loadLocationsCache() {
+  const { data, error } = await withTimeout(sb.from('locations').select('*').eq('is_archived', false).order('site_code'));
+  if (error?.isTimeout) {
+    showToast('Offline — showing cached sites');
+    // locationsCache already holds last-known data; just re-render
+  } else {
+    locationsCache = data || [];
+    localStorage.setItem('wdc_sites_cache', JSON.stringify(locationsCache));
+  }
+  if (!locationsCache.length) {
+    try { locationsCache = JSON.parse(localStorage.getItem('wdc_sites_cache') || '[]'); } catch {}
+  }
+  // Restore active site from localStorage, validate it still exists
+  const saved = localStorage.getItem('wdc_active_site');
+  activeSiteId = (saved && locationsCache.find(l => l.id === saved)) ? saved : null;
+  if (!activeSiteId) localStorage.removeItem('wdc_active_site');
+  renderSitesList();
+  populateLocationDropdowns();
+  // Update specimens title if a site is active
+  const site = locationsCache.find(l => l.id === activeSiteId);
+  const title = document.getElementById('specimens-page-title');
+  if (title) title.textContent = site ? `Specimens — ${site.site_code}` : 'Specimens';
+}
+
+function renderSitesList() {
+  const container = document.getElementById('sites-list');
+  if (locationsCache.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No sites yet. Tap + to add the first field site.</p></div>';
+    return;
+  }
+  container.innerHTML = locationsCache.map(loc => {
+    const isActive = loc.id === activeSiteId;
+    return `
+    <div class="card${isActive ? ' site-active' : ''}" onclick="selectSite('${loc.id}')">
+      <div class="card-row">
+        <div style="flex:1;min-width:0;">
+          <div class="card-title">${loc.site_code}</div>
+          <div class="card-sub">${loc.site_name || ''}</div>
+          <div class="card-meta">${loc.verbatim_locality || ''}</div>
+        </div>
+        ${isActive ? `<button class="site-edit-btn" onclick="event.stopPropagation();openLocationForm('${loc.id}')">Edit</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectSite(id) {
+  activeSiteId = (activeSiteId === id) ? null : id; // tap again to deselect
+  localStorage.setItem('wdc_active_site', activeSiteId || '');
+  renderSitesList();
+  // Update specimens title
+  const site = locationsCache.find(l => l.id === activeSiteId);
+  const title = document.getElementById('specimens-page-title');
+  if (title) title.textContent = site ? `Specimens — ${site.site_code}` : 'Specimens';
+}
+
+async function deleteSite() {
+  const id = editingLocationId;
+  const loc = locationsCache.find(l => l.id === id);
+  if (!loc) return;
+  // Check for linked specimens
+  const { count } = await sb.from('occurrences').select('id', { count: 'exact', head: true }).eq('location_id', id);
+  let msg, action;
+  if (count > 0) {
+    msg = `Site "${loc.site_code}" has ${count} specimen(s). It will be hidden from the app but all data will be preserved. Hide it?`;
+    action = async () => sb.from('locations').update({ is_archived: true }).eq('id', id);
+  } else {
+    msg = `Delete site "${loc.site_code}"? It has no specimens and will be permanently removed.`;
+    action = async () => sb.from('locations').delete().eq('id', id);
+  }
+  if (!confirm(msg)) return;
+  const { error } = await action();
+  if (error) { showToast('Error: ' + error.message); return; }
+  if (activeSiteId === id) {
+    activeSiteId = null;
+    localStorage.removeItem('wdc_active_site');
+    const title = document.getElementById('specimens-page-title');
+    if (title) title.textContent = 'Specimens';
+  }
+  await loadLocationsCache();
+  showView('sites');
+  showToast(count > 0 ? 'Site hidden' : 'Site deleted');
+}
+
+function populateLocationDropdowns() {
+  const sel = document.getElementById('occ-location-id');
+  if (!sel) return;
+  const current = sel.value || activeSiteId;
+  sel.innerHTML = '<option value="">— select site —</option>' + locationsCache.map(l =>
+    `<option value="${l.id}">${l.site_code}${l.site_name ? ' — '+l.site_name : ''}</option>`
+  ).join('');
+  if (current) sel.value = current;
+}
+
+function openLocationForm(locId) {
+  editingLocationId = locId;
+  const isNew = !locId;
+  document.getElementById('loc-form-title').textContent = isNew ? 'New Site' : 'Edit Site';
+  document.getElementById('loc-form-error').style.display = 'none';
+  document.getElementById('delete-site-row').style.display = isNew ? 'none' : 'block';
+  currentLocationGPS = null;
+  document.getElementById('loc-gps-display').style.display = 'none';
+
+  if (isNew) {
+    document.getElementById('loc-site-code').value = '';
+    document.getElementById('loc-site-name').value = '';
+    document.getElementById('loc-verbatim').value = '';
+    document.getElementById('loc-m1-label').value = '';
+    document.getElementById('loc-m2-label').value = '';
+    document.getElementById('loc-remarks').value = '';
+    document.getElementById('loc-formation').value = '';
+    document.getElementById('loc-epoch').innerHTML = '<option value="">— select formation —</option>';
+  } else {
+    const loc = locationsCache.find(l => l.id === locId);
+    if (loc) {
+      document.getElementById('loc-site-code').value = loc.site_code || '';
+      document.getElementById('loc-site-name').value = loc.site_name || '';
+      document.getElementById('loc-verbatim').value = loc.verbatim_locality || '';
+      document.getElementById('loc-m1-label').value = loc.marker_1_label || '';
+      document.getElementById('loc-m2-label').value = loc.marker_2_label || '';
+      document.getElementById('loc-remarks').value = loc.location_remarks || '';
+      document.getElementById('loc-formation').value = loc.formation || '';
+      if (loc.formation) {
+        onLocFormationChange();
+        if (loc.epoch) document.getElementById('loc-epoch').value = loc.epoch;
+      }
+      if (loc.decimal_latitude && loc.decimal_longitude) {
+        currentLocationGPS = { lat: loc.decimal_latitude, lng: loc.decimal_longitude };
+        showLocationGPS(currentLocationGPS);
+      }
+    }
+  }
+  showView('location-form');
+}
+
+function showLocationGPS(gps) {
+  const el = document.getElementById('loc-gps-display');
+  el.textContent = `Lat: ${gps.lat.toFixed(6)}, Lng: ${gps.lng.toFixed(6)}`;
+  el.style.display = 'block';
+}
+
+function captureGPSForLocation() {
+  if (!navigator.geolocation) { showToast('GPS not available'); return; }
+  showLoading('Getting GPS…');
+  navigator.geolocation.getCurrentPosition(pos => {
+    hideLoading();
+    currentLocationGPS = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    showLocationGPS(currentLocationGPS);
+    showToast('GPS captured');
+  }, err => {
+    hideLoading();
+    showToast('GPS error: ' + err.message);
+  }, { enableHighAccuracy: true, timeout: 15000 });
+}
+
+async function saveLocation() {
+  const errEl = document.getElementById('loc-form-error');
+  errEl.style.display = 'none';
+  const siteCode = document.getElementById('loc-site-code').value.trim().toUpperCase();
+  if (!siteCode) { errEl.textContent = 'Site code is required.'; errEl.style.display = 'block'; return; }
+
+  const data = {
+    site_code: siteCode,
+    site_name: document.getElementById('loc-site-name').value.trim() || null,
+    verbatim_locality: document.getElementById('loc-verbatim').value.trim() || null,
+    marker_1_label: document.getElementById('loc-m1-label').value.trim() || null,
+    marker_2_label: document.getElementById('loc-m2-label').value.trim() || null,
+    location_remarks: document.getElementById('loc-remarks').value.trim() || null,
+    formation: document.getElementById('loc-formation').value || null,
+    epoch: document.getElementById('loc-epoch').value || null,
+    decimal_latitude: currentLocationGPS?.lat || null,
+    decimal_longitude: currentLocationGPS?.lng || null,
+    created_by: currentUser.id
+  };
+
+  if (editingLocationId) data.id = editingLocationId;
+  else data.id = genUUID();
+
+  const localId = data.id;
+  enqueue({ action: 'upsert', table: 'locations', data, localId, timestamp: Date.now() });
+
+  // Optimistic update local cache
+  const existing = locationsCache.findIndex(l => l.id === localId);
+  if (existing >= 0) locationsCache[existing] = data; else locationsCache.push(data);
+  locationsCache.sort((a,b) => a.site_code.localeCompare(b.site_code));
+
+  renderSitesList();
+  populateLocationDropdowns();
+  updateOnlineBadge();
+  showToast('Site saved');
+  showView('sites');
+
+  if (navigator.onLine) await flushQueue();
+}
+
+// ════════════════════════════════════════════════════════════
+//  OCCURRENCES
+// ════════════════════════════════════════════════════════════
+async function loadOccurrences() {
+  const container = document.getElementById('specimens-list');
+  if (!activeSiteId) {
+    container.innerHTML = '<div class="empty-state"><p>Select a site on the Sites tab first.</p></div>';
+    return;
+  }
+  container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  const { data, error } = await withTimeout(
+    sb.from('occurrences').select('*, locations(site_code, site_name)').eq('location_id', activeSiteId).order('created_at', { ascending: false }).limit(100)
+  );
+  if (error?.isTimeout) {
+    // Fall back to offline queue items for this site
+    const queued = getQueue()
+      .filter(q => q.table === 'occurrences' && q.data.location_id === activeSiteId)
+      .map(q => q.data);
+    if (queued.length) {
+      showToast('Offline — showing unsynced specimens');
+      renderOccurrenceCards(queued);
+    } else {
+      container.innerHTML = '<div class="empty-state"><p>Offline — no cached specimens for this site.</p></div>';
+    }
+    return;
+  }
+  if (error) { container.innerHTML = `<div class="error-msg">Error loading specimens: ${error.message}</div>`; return; }
+  const items = data || [];
+  if (items.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>No specimens yet. Tap + to record the first find.</p></div>';
+    return;
+  }
+  renderOccurrenceCards(items);
+}
+
+function renderOccurrenceCards(items) {
+  const container = document.getElementById('specimens-list');
+  container.innerHTML = items.map(occ => `
+    <div class="card" onclick="openOccurrenceForm('${occ.id}')">
+      <div class="card-row">
+        <div style="flex:1;min-width:0;">
+          <div class="card-title">${occ.catalogNumber || '—'}</div>
+          <div class="card-sub">${occ.scientific_name || 'Unidentified'} ${occ.verbatim_element ? '· '+occ.verbatim_element : ''}</div>
+          <div class="card-meta">${fmtDate(occ.eventDate)}${occ.locations ? ' · '+occ.locations.site_code : ''}</div>
+        </div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:18px;height:18px;color:var(--text-dim);flex-shrink:0;margin-top:3px;"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+//  CATALOG NUMBER GENERATION
+// ════════════════════════════════════════════════════════════
+async function generateCatalogNumber(locationId) {
+  const loc = locationsCache.find(l => l.id === locationId);
+  if (!loc) return null;
+  const siteCode = loc.site_code;
+  const year = new Date().getFullYear();
+  const prefix = `${siteCode}-${year}-`;
+
+  const { data } = await sb.from('occurrences')
+    .select('catalogNumber')
+    .eq('location_id', locationId)
+    .like('catalogNumber', `${prefix}%`);
+
+  let maxNum = 0;
+  (data || []).forEach(row => {
+    if (row.catalogNumber) {
+      const parts = row.catalogNumber.split('-');
+      const num = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  });
+
+  // Also check local queue
+  const q = getQueue();
+  q.forEach(item => {
+    if (item.table === 'occurrences' && item.data.catalogNumber && item.data.catalogNumber.startsWith(prefix)) {
+      const parts = item.data.catalogNumber.split('-');
+      const num = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  });
+
+  return `${prefix}${pad3(maxNum + 1)}`;
+}
+
+// ════════════════════════════════════════════════════════════
+//  OCCURRENCE FORM
+// ════════════════════════════════════════════════════════════
+function openOccurrenceForm(occurrenceId) {
+  editingOccurrenceId = occurrenceId;
+  pendingPhotos = [];
+  radialPointCount = 0;
+  document.getElementById('radial-points-container').innerHTML = '';
+  document.getElementById('radial-add-btn').style.display = 'inline-flex';
+  document.getElementById('photo-grid').innerHTML = '';
+  document.getElementById('occ-form-error').style.display = 'none';
+  document.getElementById('occ-form-success').style.display = 'none';
+  document.getElementById('custody-section').style.display = 'none';
+
+  // Build chip groups
+  buildChips('chips-pre-dep', CONDITION_OPTIONS);
+  buildChips('chips-current-cond', CONDITION_OPTIONS);
+  buildChips('chips-chemicals', CHEMICALS_OPTIONS);
+  buildChips('chips-preparations', PREP_OPTIONS);
+
+  // Reset toggles
+  setToggle('occ-in-situ', 'Unknown');
+  setToggle('occ-pos-known', 'Yes');
+  setToggle('occ-ready-removal', 'No');
+
+  currentOccurrenceGPS = null;
+  document.getElementById('occ-gps-display').style.display = 'none';
+
+  if (!occurrenceId) {
+    document.getElementById('occ-form-title').textContent = 'New Specimen';
+    document.getElementById('occ-catalog-display').textContent = '— select a site first —';
+    document.getElementById('occ-catalog-number').value = '';
+    document.getElementById('occ-event-date').value = todayStr();
+    document.getElementById('occ-recorded-by').value = currentProfile?.full_name || '';
+    document.getElementById('occ-intern-staff').value = '';
+    document.getElementById('occ-scientific-name').value = '';
+    document.getElementById('occ-taxon-other').value = '';
+    document.getElementById('occ-taxon-other').style.display = 'none';
+    document.getElementById('occ-verbatim-element').value = '';
+    document.getElementById('occ-element-other').value = '';
+    document.getElementById('occ-element-other').style.display = 'none';
+    // Prefill geologic context from active site
+    const activeLoc = locationsCache.find(l => l.id === activeSiteId);
+    if (activeLoc?.formation) {
+      document.getElementById('occ-formation').value = activeLoc.formation;
+      onFormationChange();
+      if (activeLoc.epoch) {
+        document.getElementById('occ-epoch').value = activeLoc.epoch;
+        onEpochChange(); // also loads site taxa into top of list
+      }
+    } else {
+      document.getElementById('occ-formation').value = '';
+      document.getElementById('occ-epoch').innerHTML = '<option value="">— select formation —</option>';
+      resetTaxaSelect();
+    }
+    document.getElementById('occ-side-l').checked = false;
+    document.getElementById('occ-side-r').checked = false;
+    document.getElementById('occ-element-remarks').value = '';
+    document.getElementById('occ-bone-missing').value = '';
+    document.getElementById('occ-pre-dep-pct').value = '';
+    document.getElementById('occ-orientation').value = '';
+    document.getElementById('occ-plunge').value = '';
+    document.getElementById('occ-max-length').value = '';
+    document.getElementById('occ-mid-width').value = '';
+    document.getElementById('occ-litho').value = '';
+    document.getElementById('occ-member').value = '';
+    document.getElementById('occ-bed').value = '';
+    document.getElementById('occ-associated').value = '';
+    document.getElementById('occ-remarks').value = '';
+    document.getElementById('occ-date-mapped').value = '';
+    document.getElementById('occ-mapped-by').value = '';
+    document.getElementById('occ-physical-map-date').value = '';
+    document.getElementById('occ-placed-on-map-by').value = '';
+    document.getElementById('occ-date-collected').value = '';
+    document.getElementById('occ-collected-by').value = '';
+    document.getElementById('occ-partially-removed').checked = false;
+    document.getElementById('occ-removal-method').value = '';
+    document.getElementById('occ-temp-storage').value = '';
+    document.getElementById('occ-staff-signature').value = '';
+    document.getElementById('occ-lat').value = '';
+    document.getElementById('occ-lng').value = '';
+    document.getElementById('occ-verbatim-coords').value = '';
+    // Set site from active selection and auto-generate catalog number
+    document.getElementById('occ-location-id').value = activeSiteId || '';
+    document.getElementById('occ-site-display').textContent = activeLoc ? `${activeLoc.site_code}${activeLoc.site_name ? ' — '+activeLoc.site_name : ''}` : '—';
+    if (activeSiteId) {
+      document.getElementById('occ-catalog-display').textContent = 'Generating…';
+      generateCatalogNumber(activeSiteId).then(catNum => {
+        document.getElementById('occ-catalog-number').value = catNum || '';
+        document.getElementById('occ-catalog-display').textContent = catNum || '—';
+      });
+    }
+    // Add first radial point
+    addRadialPoint();
+  } else {
+    loadOccurrenceIntoForm(occurrenceId);
+  }
+  showView('occurrence-form');
+}
+
+async function loadOccurrenceIntoForm(occId) {
+  showLoading('Loading specimen…');
+  const { data: occ, error } = await withTimeout(sb.from('occurrences').select('*, locations(*)').eq('id', occId).single());
+  hideLoading();
+  if (error?.isTimeout) {
+    // Try to find in offline queue
+    const queued = getQueue().find(q => q.table === 'occurrences' && q.localId === occId);
+    if (queued) {
+      showToast('Offline — loading unsynced data');
+      populateOccurrenceForm(queued.data);
+      return;
+    }
+    showToast('Offline — specimen not in local cache');
+    return;
+  }
+  if (error || !occ) { showToast('Could not load specimen'); return; }
+  populateOccurrenceForm(occ);
+}
+
+async function populateOccurrenceForm(occ) {
+  document.getElementById('occ-form-title').textContent = occ.catalogNumber || 'Edit Specimen';
+  document.getElementById('occ-catalog-display').textContent = occ.catalogNumber || '—';
+  document.getElementById('occ-catalog-number').value = occ.catalogNumber || '';
+  document.getElementById('occ-location-id').value = occ.location_id || '';
+  const occLoc = occ.locations || locationsCache.find(l => l.id === occ.location_id);
+  document.getElementById('occ-site-display').textContent = occLoc ? `${occLoc.site_code}${occLoc.site_name ? ' — '+occLoc.site_name : ''}` : '—';
+  document.getElementById('occ-event-date').value = occ.eventDate || '';
+  document.getElementById('occ-recorded-by').value = occ.recordedBy || '';
+  document.getElementById('occ-intern-staff').value = occ.intern_staff || '';
+  // Restore formation → epoch → taxa chain first
+  const formSel = document.getElementById('occ-formation');
+  formSel.value = occ.formation || '';
+  if (occ.formation) onFormationChange();
+  if (occ.earliest_epoch_or_lowest_series) {
+    document.getElementById('occ-epoch').value = occ.earliest_epoch_or_lowest_series;
+    onEpochChange();
+  }
+  setSelectOrOther('occ-scientific-name', 'occ-taxon-other', occ.scientific_name || '');
+  setSelectOrOther('occ-verbatim-element', 'occ-element-other', occ.verbatim_element || '');
+  const side = occ.element_side || '';
+  document.getElementById('occ-side-l').checked = side.includes('L');
+  document.getElementById('occ-side-r').checked = side.includes('R');
+  document.getElementById('occ-element-remarks').value = occ.element_remarks || '';
+  if (occ.in_situ) setToggle('occ-in-situ', occ.in_situ);
+  if (occ.approx_position_known !== null && occ.approx_position_known !== undefined) setToggle('occ-pos-known', occ.approx_position_known ? 'Yes' : 'No');
+  document.getElementById('occ-bone-missing').value = occ.bone_missing_pct || '';
+  document.getElementById('occ-pre-dep-pct').value = occ.pre_depositional_pct || '';
+  buildChips('chips-pre-dep', CONDITION_OPTIONS, occ.pre_depositional_condition || []);
+  buildChips('chips-current-cond', CONDITION_OPTIONS, occ.current_condition || []);
+  buildChips('chips-chemicals', CHEMICALS_OPTIONS, occ.chemicals_applied || []);
+  buildChips('chips-preparations', PREP_OPTIONS, occ.preparations || []);
+  document.getElementById('occ-orientation').value = occ.orientation_degrees ?? '';
+  document.getElementById('occ-plunge').value = occ.plunge_degrees ?? '';
+  document.getElementById('occ-max-length').value = occ.max_length_cm ?? '';
+  document.getElementById('occ-mid-width').value = occ.mid_width_cm ?? '';
+  document.getElementById('occ-litho').value = occ.lithologic_description || '';
+  document.getElementById('occ-member').value = occ.member || '';
+  document.getElementById('occ-bed').value = occ.bed || '';
+  document.getElementById('occ-associated').value = occ.associated_occurrences || '';
+  document.getElementById('occ-remarks').value = occ.occurrence_remarks || '';
+  document.getElementById('occ-date-mapped').value = occ.date_mapped || '';
+  document.getElementById('occ-mapped-by').value = occ.mapped_by || '';
+  document.getElementById('occ-physical-map-date').value = occ.physical_map_date || '';
+  document.getElementById('occ-placed-on-map-by').value = occ.placed_on_map_by || '';
+  if (occ.ready_for_removal !== null) setToggle('occ-ready-removal', occ.ready_for_removal ? 'Yes' : 'No');
+  document.getElementById('occ-date-collected').value = occ.date_collected || '';
+  document.getElementById('occ-collected-by').value = occ.collected_by || '';
+  document.getElementById('occ-partially-removed').checked = !!occ.partially_removed;
+  document.getElementById('occ-removal-method').value = occ.removal_method || '';
+  document.getElementById('occ-temp-storage').value = occ.temp_storage_location || '';
+  document.getElementById('occ-staff-signature').value = occ.staff_signature || '';
+  if (occ.decimal_latitude && occ.decimal_longitude) {
+    currentOccurrenceGPS = { lat: occ.decimal_latitude, lng: occ.decimal_longitude };
+    document.getElementById('occ-lat').value = occ.decimal_latitude;
+    document.getElementById('occ-lng').value = occ.decimal_longitude;
+    document.getElementById('occ-verbatim-coords').value = occ.verbatim_coordinates || '';
+    const el = document.getElementById('occ-gps-display');
+    el.textContent = `Lat: ${occ.decimal_latitude}, Lng: ${occ.decimal_longitude}`;
+    el.style.display = 'block';
+  }
+
+  // Radial points
+  if (occ.radial_measurements) {
+    const pts = occ.radial_measurements;
+    const loc = occ.locations;
+    const m1Label = loc?.marker_1_label || 'Marker 1';
+    const m2Label = loc?.marker_2_label || 'Marker 2';
+    document.getElementById('radial-points-container').innerHTML = '';
+    radialPointCount = 0;
+    pts.forEach(pt => {
+      addRadialPoint(m1Label, m2Label, pt);
+    });
+  } else {
+    addRadialPoint();
+  }
+
+  // Load custody events
+  const { data: custody } = await withTimeout(sb.from('custody_events').select('*').eq('occurrence_id', occ.occurrence_id || occ.id).order('created_at'));
+  if (custody && custody.length > 0) {
+    document.getElementById('custody-section').style.display = 'block';
+    document.getElementById('custody-list').innerHTML = custody.map(c => `
+      <div class="custody-item">
+        <div class="event-type">${c.event_type}</div>
+        <div class="event-meta">${fmtDate(c.created_at)} · ${c.handler || ''}${c.location ? ' · '+c.location : ''}${c.notes ? ' — '+c.notes : ''}</div>
+      </div>
+    `).join('');
+  }
+
+  // Load photos — prefer local IndexedDB, fall back to signed URLs for anything not on device
+  const occId = occ.id || occ.occurrence_id;
+  const idbPhotos = await getAllPhotosIDB();
+  const localPhotos = idbPhotos.filter(p => p.occurrenceId === occId);
+
+  if (localPhotos.length > 0) {
+    // Render from device storage — no network needed
+    localPhotos.sort((a, b) => a.seq - b.seq);
+    for (const p of localPhotos) {
+      addPhotoThumb(p.dataUrl, p.seq, null, true, p.filename);
+    }
+  } else {
+    // Not on this device — fetch signed URLs from Supabase
+    const { data: photos } = await withTimeout(sb.from('media').select('*').eq('occurrence_id', occId).order('sequence_number'));
+    if (photos && photos.length > 0) {
+      for (const ph of photos) {
+        const { data: urlData, error: urlErr } = await sb.storage.from('media').createSignedUrl(ph.storage_path, 3600);
+        if (urlErr || !urlData?.signedUrl) continue;
+        addPhotoThumb(urlData.signedUrl, ph.sequence_number, null, true, ph.filename);
+      }
+    }
+  }
+}
+
+async function onLocationChange() {
+  const locId = document.getElementById('occ-location-id').value;
+  if (!locId) {
+    document.getElementById('occ-catalog-display').textContent = '— select a site first —';
+    document.getElementById('occ-catalog-number').value = '';
+    document.getElementById('radial-points-container').innerHTML = '';
+    radialPointCount = 0;
+    addRadialPoint();
+    return;
+  }
+  // Update radial point labels
+  const loc = locationsCache.find(l => l.id === locId);
+  const m1Label = loc?.marker_1_label || 'Marker 1';
+  const m2Label = loc?.marker_2_label || 'Marker 2';
+  document.querySelectorAll('.radial-m1-label').forEach(el => el.textContent = m1Label + ' (cm)');
+  document.querySelectorAll('.radial-m2-label').forEach(el => el.textContent = m2Label + ' (cm)');
+
+  if (!editingOccurrenceId) {
+    const catNum = await generateCatalogNumber(locId);
+    document.getElementById('occ-catalog-display').textContent = catNum || '—';
+    document.getElementById('occ-catalog-number').value = catNum || '';
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  RADIAL POINTS
+// ════════════════════════════════════════════════════════════
+const POINT_LABELS = ['A','B','C','D'];
+
+function addRadialPoint(m1Label, m2Label, existing) {
+  if (radialPointCount >= 4) { document.getElementById('radial-add-btn').style.display = 'none'; return; }
+  const locId = document.getElementById('occ-location-id').value;
+  const loc = locationsCache.find(l => l.id === locId);
+  m1Label = m1Label || loc?.marker_1_label || 'Marker 1';
+  m2Label = m2Label || loc?.marker_2_label || 'Marker 2';
+  const label = POINT_LABELS[radialPointCount];
+  const idx = radialPointCount;
+  radialPointCount++;
+
+  const div = document.createElement('div');
+  div.className = 'radial-point';
+  div.id = `radial-point-${idx}`;
+  div.innerHTML = `
+    <div class="radial-point-header">Point ${label}</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label radial-m1-label">${m1Label} (cm)</label>
+        <input type="number" id="radial-m1-${idx}" class="form-input" placeholder="distance" inputmode="decimal" step="0.1" value="${existing?.m1 ?? ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label radial-m2-label">${m2Label} (cm)</label>
+        <input type="number" id="radial-m2-${idx}" class="form-input" placeholder="distance" inputmode="decimal" step="0.1" value="${existing?.m2 ?? ''}">
+      </div>
+    </div>
+  `;
+  document.getElementById('radial-points-container').appendChild(div);
+  if (radialPointCount >= 4) document.getElementById('radial-add-btn').style.display = 'none';
+}
+
+function getRadialMeasurements() {
+  const pts = [];
+  for (let i = 0; i < radialPointCount; i++) {
+    const m1 = parseFloat(document.getElementById(`radial-m1-${i}`)?.value);
+    const m2 = parseFloat(document.getElementById(`radial-m2-${i}`)?.value);
+    if (!isNaN(m1) || !isNaN(m2)) {
+      pts.push({ label: POINT_LABELS[i], m1: isNaN(m1) ? null : m1, m2: isNaN(m2) ? null : m2 });
+    }
+  }
+  return pts.length > 0 ? pts : null;
+}
+
+// ════════════════════════════════════════════════════════════
+//  GPS & COMPASS
+// ════════════════════════════════════════════════════════════
+function captureGPSForOccurrence() {
+  if (!navigator.geolocation) { showToast('GPS not available'); return; }
+  showLoading('Getting GPS…');
+  navigator.geolocation.getCurrentPosition(pos => {
+    hideLoading();
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    currentOccurrenceGPS = { lat, lng };
+    document.getElementById('occ-lat').value = lat;
+    document.getElementById('occ-lng').value = lng;
+    const verbatim = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    document.getElementById('occ-verbatim-coords').value = verbatim;
+    const el = document.getElementById('occ-gps-display');
+    el.textContent = `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)} (±${Math.round(pos.coords.accuracy)}m)`;
+    el.style.display = 'block';
+    showToast('GPS captured');
+  }, err => {
+    hideLoading();
+    showToast('GPS error: ' + err.message);
+  }, { enableHighAccuracy: true, timeout: 15000 });
+}
+
+async function captureCompassHeading() {
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if (perm !== 'granted') { showToast('Compass permission denied'); return; }
+      compassPermissionGranted = true;
+    } catch (e) { showToast('Could not request compass permission'); return; }
+  }
+  showToast('Point device N and hold still…');
+  const handler = e => {
+    const heading = e.webkitCompassHeading ?? (e.alpha ? (360 - e.alpha) : null);
+    if (heading !== null && heading !== undefined) {
+      document.getElementById('occ-orientation').value = Math.round(heading);
+      window.removeEventListener('deviceorientation', handler);
+      showToast(`Heading captured: ${Math.round(heading)}°`);
+    }
+  };
+  window.addEventListener('deviceorientation', handler);
+  setTimeout(() => window.removeEventListener('deviceorientation', handler), 5000);
+}
+
+async function capturePlunge() {
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if (perm !== 'granted') { showToast('Compass permission denied'); return; }
+    } catch (e) { showToast('Could not request permission'); return; }
+  }
+  showToast('Hold device along bone axis…');
+  const handler = e => {
+    const beta = e.beta;
+    if (beta !== null && beta !== undefined) {
+      document.getElementById('occ-plunge').value = Math.round(beta);
+      window.removeEventListener('deviceorientation', handler);
+      showToast(`Plunge captured: ${Math.round(beta)}°`);
+    }
+  };
+  window.addEventListener('deviceorientation', handler);
+  setTimeout(() => window.removeEventListener('deviceorientation', handler), 5000);
+}
+
+// ════════════════════════════════════════════════════════════
+//  PHOTOS
+// ════════════════════════════════════════════════════════════
+function capturePhoto(useCamera) {
+  const input = document.getElementById('photo-input');
+  input.capture = useCamera ? 'environment' : '';
+  if (!useCamera) input.removeAttribute('capture');
+  input.value = '';
+  input.click();
+}
+
+async function handlePhotoSelected(event) {
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
+  for (const file of files) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const seq = pendingPhotos.length + 1;
+      const catNum = document.getElementById('occ-catalog-number').value || 'PENDING';
+      const filename = `${catNum}_photo-${pad3(seq)}.jpg`;
+      const photo = { dataUrl: e.target.result, filename, file, seq };
+      pendingPhotos.push(photo);
+      addPhotoThumb(e.target.result, seq, pendingPhotos.length - 1, false);
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function addPhotoThumb(src, seq, pendingIdx, readonly, filename) {
+  const grid = document.getElementById('photo-grid');
+  const div = document.createElement('div');
+  div.className = 'photo-thumb';
+  const fname = filename || `photo-${pad3(seq)}.jpg`;
+  div.innerHTML = `
+    <img src="${src}" alt="Photo ${seq}" loading="lazy" onclick="openLightbox('${src}','${fname}')">
+    <div class="photo-seq">${pad3(seq)}</div>
+    ${readonly ? `<div class="photo-saved-badge">S</div>` : ''}
+    ${!readonly ? `<button class="photo-del" onclick="removePhoto(${pendingIdx}, this.closest('.photo-thumb'))">×</button>` : ''}
+  `;
+  grid.appendChild(div);
+}
+
+function removePhoto(idx, thumbEl) {
+  pendingPhotos.splice(idx, 1);
+  thumbEl.remove();
+  // Renumber remaining
+  pendingPhotos.forEach((p, i) => p.seq = i + 1);
+  document.querySelectorAll('.photo-thumb .photo-seq').forEach((el, i) => el.textContent = pad3(i+1));
+}
+
+async function uploadPendingPhotos(occurrenceId, catalogNumber) {
+  const locId = document.getElementById('occ-location-id').value;
+  const loc = locationsCache.find(l => l.id === locId);
+  const siteCode = loc?.site_code || 'UNKNOWN';
+
+  for (let i = 0; i < pendingPhotos.length; i++) {
+    const photo = pendingPhotos[i];
+    const filename = `${catalogNumber}_photo-${pad3(i+1)}.jpg`;
+    const storagePath = `${siteCode}/${catalogNumber}/${filename}`;
+
+    if (navigator.onLine) {
+      try {
+        const blob = await fetch(photo.dataUrl).then(r => r.blob());
+        const { error: upErr } = await sb.storage.from('media').upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
+        if (!upErr) {
+          await sb.from('media').insert({
+            occurrence_id: occurrenceId,
+            storage_path: storagePath,
+            filename,
+            sequence_number: i + 1,
+            media_type: 'image/jpeg',
+            created_by: currentUser.id
+          });
+        }
+      } catch (e) {
+        // Store in IDB for later
+        await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq: i+1, catalogNumber });
+      }
+    } else {
+      await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq: i+1, catalogNumber });
+    }
+  }
+}
+
+async function syncPendingPhotos() {
+  const photos = await getAllPhotosIDB();
+  for (const photo of photos) {
+    try {
+      const blob = await fetch(photo.dataUrl).then(r => r.blob());
+      const { error: upErr } = await sb.storage.from('media').upload(photo.storagePath, blob, { contentType: 'image/jpeg', upsert: true });
+      if (!upErr) {
+        await sb.from('media').insert({
+          occurrence_id: photo.occurrenceId,
+          storage_path: photo.storagePath,
+          filename: photo.filename,
+          sequence_number: photo.seq,
+          media_type: 'image/jpeg',
+          created_by: currentUser.id
+        });
+        await deletePhotoIDB(photo.id);
+      }
+    } catch (e) { /* keep for next sync */ }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  SAVE OCCURRENCE
+// ════════════════════════════════════════════════════════════
+async function saveOccurrence() {
+  const errEl = document.getElementById('occ-form-error');
+  const succEl = document.getElementById('occ-form-success');
+  errEl.style.display = 'none';
+  succEl.style.display = 'none';
+
+  const locationId = document.getElementById('occ-location-id').value;
+  if (!locationId) {
+    errEl.textContent = 'Please select a site.';
+    errEl.style.display = 'block';
+    // Open discovery section
+    const body = document.getElementById('body-discovery');
+    body.classList.add('open');
+    document.getElementById('chevron-discovery').classList.add('open');
+    document.getElementById('main-content').scrollTop = 0;
+    return;
+  }
+
+  const btn = document.getElementById('save-occ-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Saving…';
+
+  const sideL = document.getElementById('occ-side-l').checked;
+  const sideR = document.getElementById('occ-side-r').checked;
+  let elementSide = '';
+  if (sideL && sideR) elementSide = 'L,R';
+  else if (sideL) elementSide = 'L';
+  else if (sideR) elementSide = 'R';
+
+  const radialMeasurements = getRadialMeasurements();
+  const catalogNumber = document.getElementById('occ-catalog-number').value;
+  const isNew = !editingOccurrenceId;
+  const occId = editingOccurrenceId || genUUID();
+
+  const data = {
+    id: occId,
+    occurrence_id: occId,
+    institution_code: 'WDC',
+    collection_code: 'PALEO',
+    basis_of_record: 'FossilSpecimen',
+    catalogNumber: catalogNumber,
+    location_id: locationId,
+    eventDate: document.getElementById('occ-event-date').value || null,
+    recordedBy: document.getElementById('occ-recorded-by').value.trim() || null,
+    intern_staff: document.getElementById('occ-intern-staff').value.trim() || null,
+    scientific_name: (() => { const s = document.getElementById('occ-scientific-name').value; return s === 'Other' ? (document.getElementById('occ-taxon-other').value.trim() || null) : (s || null); })(),
+    verbatim_element: (() => { const s = document.getElementById('occ-verbatim-element').value; return s === 'Other' ? (document.getElementById('occ-element-other').value.trim() || null) : (s || null); })(),
+    element_side: elementSide || null,
+    element_remarks: document.getElementById('occ-element-remarks').value.trim() || null,
+    in_situ: getToggle('occ-in-situ'),
+    approx_position_known: getToggle('occ-pos-known') === 'Yes',
+    bone_missing_pct: document.getElementById('occ-bone-missing').value || null,
+    pre_depositional_pct: document.getElementById('occ-pre-dep-pct').value || null,
+    pre_depositional_condition: getChips('chips-pre-dep'),
+    current_condition: getChips('chips-current-cond'),
+    chemicals_applied: getChips('chips-chemicals'),
+    preparations: getChips('chips-preparations'),
+    orientation_degrees: parseFloat(document.getElementById('occ-orientation').value) || null,
+    plunge_degrees: parseFloat(document.getElementById('occ-plunge').value) || null,
+    max_length_cm: parseFloat(document.getElementById('occ-max-length').value) || null,
+    mid_width_cm: parseFloat(document.getElementById('occ-mid-width').value) || null,
+    radial_measurements: radialMeasurements,
+    radial_point_count: radialMeasurements?.length || null,
+    lithologic_description: document.getElementById('occ-litho').value.trim() || null,
+    formation: document.getElementById('occ-formation').value.trim() || null,
+    member: document.getElementById('occ-member').value.trim() || null,
+    bed: document.getElementById('occ-bed').value.trim() || null,
+    earliest_epoch_or_lowest_series: document.getElementById('occ-epoch').value.trim() || null,
+    associated_occurrences: document.getElementById('occ-associated').value.trim() || null,
+    occurrence_remarks: document.getElementById('occ-remarks').value.trim() || null,
+    decimal_latitude: parseFloat(document.getElementById('occ-lat').value) || null,
+    decimal_longitude: parseFloat(document.getElementById('occ-lng').value) || null,
+    verbatim_coordinates: document.getElementById('occ-verbatim-coords').value || null,
+    date_mapped: document.getElementById('occ-date-mapped').value || null,
+    mapped_by: document.getElementById('occ-mapped-by').value.trim() || null,
+    physical_map_date: document.getElementById('occ-physical-map-date').value || null,
+    placed_on_map_by: document.getElementById('occ-placed-on-map-by').value.trim() || null,
+    ready_for_removal: getToggle('occ-ready-removal') === 'Yes',
+    date_collected: document.getElementById('occ-date-collected').value || null,
+    collected_by: document.getElementById('occ-collected-by').value.trim() || null,
+    partially_removed: document.getElementById('occ-partially-removed').checked,
+    removal_method: document.getElementById('occ-removal-method').value.trim() || null,
+    temp_storage_location: document.getElementById('occ-temp-storage').value.trim() || null,
+    staff_signature: document.getElementById('occ-staff-signature').value.trim() || null,
+    sync_status: 'local',
+    created_by: currentUser.id,
+    updated_at: new Date().toISOString()
+  };
+  if (isNew) data.created_at = new Date().toISOString();
+
+  // Enqueue
+  enqueue({ action: 'upsert', table: 'occurrences', data, localId: occId, timestamp: Date.now() });
+  updateOnlineBadge();
+
+  // Chain of custody for new occurrence
+  if (isNew) {
+    const custodyEvent = {
+      id: genUUID(),
+      occurrence_id: occId,
+      event_type: 'collected',
+      handler: data.recordedBy || currentProfile?.full_name,
+      location: locationsCache.find(l => l.id === locationId)?.site_code || '',
+      condition: data.current_condition?.join(', ') || '',
+      notes: 'Initial collection',
+      created_at: new Date().toISOString(),
+      created_by: currentUser.id
+    };
+    enqueue({ action: 'upsert', table: 'custody_events', data: custodyEvent, localId: custodyEvent.id, timestamp: Date.now() });
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Specimen';
+
+  // Upload photos
+  if (pendingPhotos.length > 0) {
+    await uploadPendingPhotos(occId, catalogNumber);
+    pendingPhotos = [];
+  }
+
+  // Update site's associated_taxa if this taxon is new to the site
+  const sciName = data.scientific_name;
+  if (sciName && sciName !== 'Indeterminate' && sciName !== 'Other' && locationId) {
+    const site = locationsCache.find(l => l.id === locationId);
+    if (site && !(site.associated_taxa || []).includes(sciName)) {
+      const newTaxa = [...(site.associated_taxa || []), sciName];
+      site.associated_taxa = newTaxa; // update local cache immediately
+      if (navigator.onLine) {
+        await sb.from('locations').update({ associated_taxa: newTaxa }).eq('id', locationId);
+      }
+    }
+  }
+
+  // Try to flush
+  if (navigator.onLine) {
+    await flushQueue();
+    await loadOccurrences();
+    showToast('Specimen saved and synced');
+  } else {
+    showToast('Saved offline — will sync when online');
+  }
+
+  editingOccurrenceId = null;
+  showView('specimens');
+}
+
+// ════════════════════════════════════════════════════════════
+//  SYNC / FLUSH QUEUE
+// ════════════════════════════════════════════════════════════
+async function flushQueue() {
+  if (!navigator.onLine) return;
+  const q = getQueue();
+  if (!q.length) return;
+
+  for (const item of q) {
+    try {
+      let err;
+      if (item.action === 'upsert') {
+        const { error } = await sb.from(item.table).upsert(item.data, { onConflict: 'id' });
+        err = error;
+      }
+      if (!err) {
+        dequeue(item.localId);
+        // Update sync_status
+        if (item.table === 'occurrences') {
+          await sb.from('occurrences').update({ sync_status: 'synced' }).eq('id', item.localId);
+        }
+      }
+    } catch (e) { /* skip this item */ }
+  }
+
+  // Try to sync offline photos too
+  await syncPendingPhotos();
+  updateOnlineBadge();
+}
+
+async function manualSync() {
+  if (!navigator.onLine) { showToast('No network connection'); return; }
+  showLoading('Syncing…');
+  await flushQueue();
+  await loadLocationsCache();
+  await loadOccurrences();
+  hideLoading();
+  showToast('Sync complete');
+  updateSettingsQueue();
+}
+
+// ════════════════════════════════════════════════════════════
+//  SETTINGS
+// ════════════════════════════════════════════════════════════
+async function updateSettingsQueue() {
+  const q = getQueue();
+  document.getElementById('settings-queue').textContent = `${q.length} item${q.length !== 1 ? 's' : ''}`;
+  const photos = await getAllPhotosIDB();
+  document.getElementById('settings-photos').textContent = `${photos.length} photo${photos.length !== 1 ? 's' : ''}`;
+}
+
+// ════════════════════════════════════════════════════════════
+//  SERVICE WORKER
+// ════════════════════════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  APP INIT
+// ════════════════════════════════════════════════════════════
+async function init() {
+  // Check existing session
+  const { data: { session } } = await sb.auth.getSession();
+  const splash = document.getElementById('splash');
+
+  if (session?.user) {
+    await onAuthSuccess(session.user);
+  } else {
+    showLoginView();
+  }
+
+  // Fade out splash
+  splash.style.opacity = '0';
+  setTimeout(() => { splash.style.display = 'none'; }, 400);
+
+  // Auth state listener
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_OUT') { showLoginView(); }
+  });
+
+  updateOnlineBadge();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+// ════════════════════════════════════════════════════════════
+//  LIGHTBOX
+// ════════════════════════════════════════════════════════════
+let lightboxSrc = null;
+let lightboxFilename = 'photo.jpg';
+
+function openLightbox(src, filename) {
+  lightboxSrc = src;
+  lightboxFilename = filename || 'photo.jpg';
+  document.getElementById('lightbox-img').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightbox-img').src = '';
+  lightboxSrc = null;
+}
+
+async function downloadLightboxPhoto() {
+  if (!lightboxSrc) return;
+  try {
+    const blob = await fetch(lightboxSrc).then(r => r.blob());
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = lightboxFilename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    showToast('Could not download photo');
+  }
+}
+</script>
+
+<!-- Lightbox overlay -->
+<div id="lightbox" onclick="if(event.target===this)closeLightbox()">
+  <button id="lightbox-close" onclick="closeLightbox()">×</button>
+  <img id="lightbox-img" src="" alt="Photo">
+  <div id="lightbox-bar">
+    <button class="btn btn-primary" onclick="downloadLightboxPhoto()">Save to Device</button>
+    <button class="btn btn-ghost" style="color:#fff;border-color:rgba(255,255,255,.3);" onclick="closeLightbox()">Close</button>
+  </div>
+</div>
+
+</body>
+</html>
