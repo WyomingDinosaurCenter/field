@@ -1019,6 +1019,9 @@ let compassPermissionGranted = false;
 let pendingPhotos = []; // [{dataUrl, filename, file}]
 let radialPointCount = 0;
 let lastSupabaseOk = true; // tracks whether last Supabase call succeeded
+const PAGE_SIZE = 8;
+let occurrencesOffset = 0;
+let occurrencesAllLoaded = false;
 
 // ════════════════════════════════════════════════════════════
 //  OFFLINE QUEUE
@@ -1120,7 +1123,17 @@ function updateOnlineBadge() {
   }
   updateSettingsQueue();
 }
-window.addEventListener('online', () => { updateOnlineBadge(); manualSync(); });
+window.addEventListener('online', async () => {
+  updateOnlineBadge();
+  const pending = getQueue().length;
+  if (!pending) return;
+  showToast(`Back online — syncing ${pending} item${pending !== 1 ? 's' : ''}…`);
+  const synced = await flushQueue();
+  await loadLocationsCache();
+  await loadOccurrences();
+  updateSettingsQueue();
+  if (synced > 0) showToast(`✓ ${synced} item${synced !== 1 ? 's' : ''} synced`);
+});
 window.addEventListener('offline', updateOnlineBadge);
 
 // ════════════════════════════════════════════════════════════
@@ -1636,41 +1649,70 @@ async function saveLocation() {
 // ════════════════════════════════════════════════════════════
 //  OCCURRENCES
 // ════════════════════════════════════════════════════════════
-async function loadOccurrences() {
+async function loadOccurrences(append = false) {
   const container = document.getElementById('specimens-list');
   if (!activeSiteId) {
     container.innerHTML = '<div class="empty-state"><p>Select a site on the Sites tab first.</p></div>';
     return;
   }
-  container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+  // Reset pagination on fresh load
+  if (!append) {
+    occurrencesOffset = 0;
+    occurrencesAllLoaded = false;
+    container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  } else {
+    // Show spinner at bottom
+    document.getElementById('load-more-btn')?.remove();
+    const spinner = document.createElement('div');
+    spinner.className = 'empty-state'; spinner.id = 'load-more-spinner';
+    spinner.innerHTML = '<div class="spinner"></div>';
+    container.appendChild(spinner);
+  }
+
+  const from = occurrencesOffset;
+  const to   = occurrencesOffset + PAGE_SIZE - 1;
+
   const { data, error } = await withTimeout(
-    sb.from('occurrences').select('*, locations(site_code, site_name)').eq('location_id', activeSiteId).order('created_at', { ascending: false }).limit(100)
+    sb.from('occurrences')
+      .select('*, locations(site_code, site_name)')
+      .eq('location_id', activeSiteId)
+      .order('created_at', { ascending: false })
+      .range(from, to)
   );
+
+  document.getElementById('load-more-spinner')?.remove();
+
   if (error?.isTimeout) {
-    // Fall back to offline queue items for this site
     const queued = getQueue()
       .filter(q => q.table === 'occurrences' && q.data.location_id === activeSiteId)
       .map(q => q.data);
     if (queued.length) {
       showToast('Offline — showing unsynced specimens');
-      renderOccurrenceCards(queued);
+      renderOccurrenceCards(queued, false);
     } else {
       container.innerHTML = '<div class="empty-state"><p>Offline — no cached specimens for this site.</p></div>';
     }
     return;
   }
   if (error) { container.innerHTML = `<div class="error-msg">Error loading specimens: ${error.message}</div>`; return; }
+
   const items = data || [];
-  if (items.length === 0) {
+
+  if (!append && items.length === 0) {
     container.innerHTML = '<div class="empty-state"><p>No specimens yet. Tap + to record the first find.</p></div>';
     return;
   }
-  renderOccurrenceCards(items);
+
+  occurrencesOffset += items.length;
+  occurrencesAllLoaded = items.length < PAGE_SIZE;
+
+  renderOccurrenceCards(items, append);
 }
 
-function renderOccurrenceCards(items) {
+function renderOccurrenceCards(items, append = false) {
   const container = document.getElementById('specimens-list');
-  container.innerHTML = items.map(occ => `
+  const html = items.map(occ => `
     <div class="card" onclick="openOccurrenceForm('${occ.id}')">
       <div class="card-row">
         <div style="flex:1;min-width:0;">
@@ -1682,6 +1724,23 @@ function renderOccurrenceCards(items) {
       </div>
     </div>
   `).join('');
+
+  if (append) {
+    container.insertAdjacentHTML('beforeend', html);
+  } else {
+    container.innerHTML = html;
+  }
+
+  // Add "Load more" button if there may be more
+  if (!occurrencesAllLoaded) {
+    const btn = document.createElement('button');
+    btn.id = 'load-more-btn';
+    btn.className = 'btn btn-ghost';
+    btn.style.cssText = 'width:100%;margin-top:8px;font-size:.85rem;';
+    btn.textContent = 'Load more…';
+    btn.onclick = () => loadOccurrences(true);
+    container.appendChild(btn);
+  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -2347,10 +2406,11 @@ async function saveOccurrence() {
 //  SYNC / FLUSH QUEUE
 // ════════════════════════════════════════════════════════════
 async function flushQueue() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return 0;
   const q = getQueue();
-  if (!q.length) return;
+  if (!q.length) return 0;
 
+  let synced = 0;
   for (const item of q) {
     try {
       let err;
@@ -2360,17 +2420,17 @@ async function flushQueue() {
       }
       if (!err) {
         dequeue(item.localId);
-        // Update sync_status
+        synced++;
         if (item.table === 'occurrences') {
           await sb.from('occurrences').update({ sync_status: 'synced' }).eq('id', item.localId);
         }
       }
-    } catch (e) { /* skip this item */ }
+    } catch (e) { /* skip this item, retry next time */ }
   }
 
-  // Try to sync offline photos too
   await syncPendingPhotos();
   updateOnlineBadge();
+  return synced;
 }
 
 async function manualSync() {
