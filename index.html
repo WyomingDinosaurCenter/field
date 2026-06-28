@@ -533,9 +533,7 @@
           Save Site
         </button>
       </div>
-      <div id="delete-site-row" style="display:none;margin-top:8px;">
-        <button class="btn btn-danger btn-full" id="delete-site-btn" onclick="deleteSite()">Delete Site</button>
-      </div>
+      <!-- Site archiving is managed via the Admin app, not the field app -->
     </div>
 
     <!-- OCCURRENCE FORM VIEW -->
@@ -1550,7 +1548,6 @@ function openLocationForm(locId) {
   const isNew = !locId;
   document.getElementById('loc-form-title').textContent = isNew ? 'New Site' : 'Edit Site';
   document.getElementById('loc-form-error').style.display = 'none';
-  document.getElementById('delete-site-row').style.display = isNew ? 'none' : 'block';
   currentLocationGPS = null;
   document.getElementById('loc-gps-display').style.display = 'none';
 
