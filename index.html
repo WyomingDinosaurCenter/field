@@ -151,7 +151,7 @@
   .form-textarea { resize: vertical; min-height: 80px; }
   .form-select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a09080' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
   #occ-scientific-name option { padding: 5px 10px; font-size: .88rem; }
-  #occ-scientific-name option[disabled] { color: var(--border); font-size: .6rem; padding: 0 8px; }
+  #occ-scientific-name optgroup { font-size: .75rem; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .readonly-field {
@@ -408,7 +408,7 @@
 
   <!-- MAIN APP (shown when authed) -->
   <header id="header" style="display:none;">
-    <span id="header-title">WDC Field</span>
+    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v21</span></span>
     <div id="online-badge" title="Connection status"></div>
     <span id="header-user"></span>
   </header>
@@ -1381,12 +1381,17 @@ function buildTaxonOptions(formation, epoch, siteTaxa) {
 
   let html = '';
   if (siteKnown.length > 0) {
+    html += `<optgroup label="This Site">`;
     html += siteKnown.map(t => `<option value="${t}">${t}</option>`).join('');
+    html += `</optgroup>`;
     if (allTaxa.length > 0) {
-      html += `<option disabled>─────────</option>`;
+      html += `<optgroup label="All Taxa">`;
+      html += allTaxa.map(t => `<option value="${t}">${t}</option>`).join('');
+      html += `</optgroup>`;
     }
+  } else {
+    html += allTaxa.map(t => `<option value="${t}">${t}</option>`).join('');
   }
-  html += allTaxa.map(t => `<option value="${t}">${t}</option>`).join('');
 
   sel.innerHTML = html || '<option value="">— select formation + epoch first —</option>';
   // Restore prior selection if still present
@@ -1450,12 +1455,15 @@ function getChips(containerId) {
 //  LOCATIONS
 // ════════════════════════════════════════════════════════════
 async function loadLocationsCache() {
-  const { data, error } = await withTimeout(sb.from('locations').select('*').eq('is_archived', false).order('site_code'));
+  const { data, error } = await withTimeout(sb.from('locations').select('*').order('site_code'));
   if (error?.isTimeout) {
     showToast('Offline — showing cached sites');
-    // locationsCache already holds last-known data; just re-render
+  } else if (error) {
+    console.error('loadLocationsCache error:', error.message);
+    showToast('Error loading sites: ' + error.message, true);
   } else {
-    locationsCache = data || [];
+    // Filter archived client-side — handles DB with or without the column
+    locationsCache = (data || []).filter(l => !l.is_archived);
     localStorage.setItem('wdc_sites_cache', JSON.stringify(locationsCache));
   }
   if (!locationsCache.length) {
