@@ -1,16 +1,29 @@
-const CACHE_NAME = 'wdc-field-v21';
+// ════════════════════════════════════════════════════════════
+//  WDC Field App — Service Worker
+//  Strategy: NETWORK-FIRST for the app shell.
+//    • Online  → always fetch the latest, and refresh the cache.
+//    • Offline → serve the last-used cached copy.
+//  This guarantees an online device never gets stuck on an old
+//  version (the previous stale-while-revalidate strategy did),
+//  while keeping the app fully usable offline.
+//
+//  iPhone-first (iOS Safari / standalone PWA); also works on
+//  Android/Chromium. Uses relative URLs so it is path-portable.
+// ════════════════════════════════════════════════════════════
+const CACHE_NAME = 'wdc-field-v23';
 const APP_SHELL  = [
-  '/field/',
-  '/field/index.html',
-  '/field/manifest.json',
-  '/field/WDC_fieldApp.png'
+  './',
+  './index.html',
+  './manifest.json',
+  './WDC_fieldApp.png'
 ];
 
 self.addEventListener('install', event => {
+  // Take over as soon as installed — don't wait for old tabs to close.
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(APP_SHELL).catch(() => {}))
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -22,50 +35,58 @@ self.addEventListener('activate', event => {
   );
 });
 
+// Let the page promote a freshly-installed worker immediately.
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  if (req.method !== 'GET') return; // never cache writes
+  const url = new URL(req.url);
 
-  // ── Supabase API: network-first, offline fallback ────────────
-  if (url.hostname.includes('supabase.co')) {
-    event.respondWith(
-      fetch(event.request).catch(() =>
-        new Response(JSON.stringify({ error: 'offline' }), {
-          headers: { 'Content-Type': 'application/json' }
-        })
-      )
-    );
-    return;
-  }
+  // ── Supabase API + storage: straight to network ─────────────
+  // The app handles its own offline behaviour (local cache + queue),
+  // so the SW must not fabricate fake responses here.
+  if (url.hostname.includes('supabase.co')) return;
 
-  // ── CDN assets (Supabase JS etc.): cache-first ───────────────
+  // ── CDN libraries (versioned, immutable): cache-first ───────
   if (url.hostname.includes('jsdelivr.net') || url.hostname.includes('cdn.')) {
     event.respondWith(
-      caches.match(event.request).then(cached => {
-        if (cached) return cached;
-        return fetch(event.request).then(response => {
-          if (response.ok) {
-            caches.open(CACHE_NAME).then(c => c.put(event.request, response.clone()));
-          }
-          return response;
-        });
-      })
+      caches.match(req).then(cached => cached || fetch(req).then(res => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(req, copy));
+        }
+        return res;
+      }))
     );
     return;
   }
 
-  // ── App shell: stale-while-revalidate ────────────────────────
-  // Serve cached version immediately (fast load), fetch update in
-  // background so next visit gets the latest without any hang.
-  event.respondWith(
-    caches.open(CACHE_NAME).then(cache =>
-      cache.match(event.request).then(cached => {
-        const fetchPromise = fetch(event.request).then(response => {
-          if (response.ok) cache.put(event.request, response.clone());
-          return response;
-        }).catch(() => cached); // offline: fall back to cache
+  // ── App shell (same-origin): NETWORK-FIRST ──────────────────
+  if (url.origin === location.origin) {
+    // For the HTML document, bypass the HTTP cache entirely so a stale
+    // GitHub Pages / Safari cached page can never shadow a new deploy.
+    const isDoc = req.mode === 'navigate'
+      || req.destination === 'document'
+      || url.pathname.endsWith('.html')
+      || url.pathname.endsWith('/');
 
-        return cached || fetchPromise; // serve cache instantly if available
-      })
-    )
-  );
+    event.respondWith(
+      fetch(req, isDoc ? { cache: 'no-store' } : {})
+        .then(res => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then(c => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(req).then(c => c || (isDoc ? caches.match('./index.html') : undefined))
+        )
+    );
+    return;
+  }
+  // Everything else: default browser handling.
 });

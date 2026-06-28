@@ -14,14 +14,17 @@ Field teams use this app to log paleontological specimens at the moment of disco
 
 ## Features
 
-- **Offline-first** — works with no connectivity; syncs automatically when back online with item count feedback
+- **Offline-first** — full read/write with no connectivity; syncs automatically when back online with item count feedback
+- **Offline sign-in** — after one online sign-in on a device, the user can sign in offline with their password (verified against a local hash); always re-verified with Supabase on reconnect
+- **Local cache** — all sites and the active site's specimens are cached on-device so they remain browsable offline
 - **Darwin Core aligned** — all fields map directly to DwC / PaleoContext terms
 - **Audit log** — every change to sites and specimens is recorded with full before/after snapshots and user attribution
 - **GPS + compass capture** — tap to fill coordinates and specimen orientation from device sensors
 - **Photo management** — capture or pick photos, queued offline and synced when connectivity returns
 - **Role-based access** — six roles enforced at the database level via Row Level Security
 - **Radial map points** — up to 4 reference point measurements (A–D) per specimen
-- **Auto catalog numbers** — format `{SITE}-{YYYY}-{###}`, scans existing records to prevent duplicates
+- **Auto catalog numbers** — format `{SITE}-{YYYY}-{###}`, scans existing records to prevent duplicates; offline records show "Pending" and are assigned a number at sync time
+- **Always-latest when online** — network-first service worker; an online device always loads the newest version, with no need to clear cache or browser data
 - **Paginated specimen list** — 8 most recent specimens shown, with Load More for older records
 - **Dark mode** — follows device system preference automatically
 - **Soft-delete sites** — archive sites without losing data; archived sites hidden from field view
@@ -124,7 +127,34 @@ Users are invited from the admin app. The invite generates a magic link that dir
 
 ## Offline Behaviour
 
-The service worker uses a **stale-while-revalidate** strategy for the app shell — the cached version loads instantly while the latest version is fetched in the background for the next visit. Supabase API calls are network-first with an offline JSON fallback. All data changes made offline are queued in localStorage and synced automatically on reconnect.
+The app is designed to be used in the field with no connectivity and to sync cleanly when a connection returns.
+
+### Updates & caching strategy
+
+The service worker (`sw.js`) is **network-first for the app shell**:
+
+- **Online** → the latest `index.html` is always fetched from the network and the cache is refreshed. The document request uses `cache: 'no-store'`, so a stale GitHub Pages / Safari HTTP-cached page can never shadow a new deploy. An online device always runs the newest version.
+- **Offline** → the last-used cached copy is served, so the app still opens and works.
+
+This replaces the earlier *stale-while-revalidate* shell strategy, which served the old cached copy first and was the cause of online devices getting stuck on a previous version.
+
+**Automatic updates (no cache-clearing required).** A new service worker calls `skipWaiting()` + `clients.claim()`, the page promotes a freshly-installed worker and reloads itself once when the new version takes over, and `activate` purges all old caches. The app also re-checks for a new version whenever it regains focus or reconnects — important for home-screen PWAs that are rarely fully closed. On a device currently stuck on an old cache, the next online open fetches the new worker, installs it, and reloads into the latest version automatically.
+
+CDN libraries (Supabase JS) are cache-first since they are version-pinned and immutable. Supabase API calls go straight to the network — the app handles its own offline behaviour (local cache + write queue), so the service worker never fabricates fake responses.
+
+### Data: local cache + write queue
+
+- **Reads** — all sites and the active site's specimens are cached in `localStorage` (specimens accumulate as sites are opened online). Offline, the Sites and Specimens views, and the specimen edit form, read straight from this cache with no network attempt.
+- **Writes** — every change made offline is queued in `localStorage`; photos are queued in IndexedDB. On reconnect the queue is flushed in dependency order (sites → specimens → custody events).
+- **Catalog numbers** — generated against the live database, so they are **deferred while offline**. Offline records display "Pending — assigned on sync" and receive their real sequential `{SITE}-{YYYY}-{###}` number when synced, with a per-site counter that prevents collisions across a batch of offline finds. Queued photos are repathed to the real catalog number before upload.
+
+### Authentication offline
+
+On the first successful **online** sign-in, the device stores a PBKDF2 hash of the password plus the user's profile (id, name, role) in `localStorage`. When offline, the login screen verifies the entered password against that local hash and grants access — no network required. The session is always re-verified with Supabase on reconnect; if the live session has lapsed, a non-destructive prompt asks the user to sign in to sync (queued data stays safe the whole time). Signing out explicitly clears the stored device credentials.
+
+## Platform Support
+
+iPhone-first (iOS Safari and standalone home-screen PWA), with Android/Chromium supported on a best-effort basis. The update and offline logic uses standard service-worker behaviour that works across both; the service worker uses relative paths so the same file is reusable by the forthcoming Lab app. One iOS caveat: a PWA suspended in the background for a long time may be slow to run its update check, but the focus/reconnect re-check plus network-first means it self-corrects as soon as it is foregrounded online.
 
 ---
 

@@ -430,7 +430,7 @@
 
   <!-- MAIN APP (shown when authed) -->
   <header id="header" style="display:none;">
-    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v21</span></span>
+    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v23</span></span>
     <div id="online-badge" title="Connection status"></div>
     <span id="header-user"></span>
   </header>
@@ -1039,6 +1039,8 @@ let compassPermissionGranted = false;
 let pendingPhotos = []; // [{dataUrl, filename, file}]
 let radialPointCount = 0;
 let lastSupabaseOk = true; // tracks whether last Supabase call succeeded
+let isOfflineSession = false; // true when signed in via offline bypass (no live Supabase JWT)
+let needsReauth = false;      // true when reconnected but no valid Supabase session
 const PAGE_SIZE = 8;
 let occurrencesOffset = 0;
 let occurrencesAllLoaded = false;
@@ -1082,6 +1084,36 @@ function dequeue(localId) {
   setQueue(q);
 }
 
+// ── Local specimen cache (per-site) ──────────────────────────
+// Shape: { [locationId]: { [occId]: occurrenceRow } }
+const OCC_CACHE_KEY = 'wdc_occurrences_cache';
+function getOccCache() {
+  try { return JSON.parse(localStorage.getItem(OCC_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+function setOccCache(c) {
+  try { localStorage.setItem(OCC_CACHE_KEY, JSON.stringify(c)); }
+  catch (e) { console.warn('Occurrence cache write failed (quota?)', e); }
+}
+// Merge freshly fetched rows for a site into the cache
+function cacheOccurrences(siteId, rows) {
+  if (!siteId) return;
+  const c = getOccCache();
+  c[siteId] = c[siteId] || {};
+  (rows || []).forEach(r => { if (r && r.id) c[siteId][r.id] = r; });
+  setOccCache(c);
+}
+// Read cached rows for a site, newest first, merged with unsynced queued records
+function getCachedOccurrences(siteId) {
+  const c = getOccCache();
+  const byId = { ...(c[siteId] || {}) };
+  // Overlay queued (unsynced) occurrences for this site so they show immediately
+  getQueue()
+    .filter(q => q.table === 'occurrences' && q.data && q.data.location_id === siteId)
+    .forEach(q => { byId[q.data.id] = { ...byId[q.data.id], ...q.data }; });
+  return Object.values(byId).sort((a, b) =>
+    String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+
 // IndexedDB for photos
 function openPhotoDB() {
   return new Promise((resolve, reject) => {
@@ -1119,6 +1151,15 @@ async function deletePhotoIDB(id) {
     tx.oncomplete = () => resolve();
   });
 }
+async function updatePhotoIDB(record) {
+  const db = await openPhotoDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('photos', 'readwrite');
+    const req = tx.objectStore('photos').put(record); // keyPath 'id' → updates in place
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
 async function getAllPhotosIDB() {
   const db = await openPhotoDB();
   return new Promise((resolve, reject) => {
@@ -1134,27 +1175,69 @@ async function getAllPhotosIDB() {
 // ════════════════════════════════════════════════════════════
 function updateOnlineBadge() {
   const badge = document.getElementById('online-badge');
-  if (navigator.onLine && lastSupabaseOk) {
+  if (navigator.onLine && needsReauth) {
+    badge.className = '';
+    badge.title = 'Reconnected — sign in to sync';
+  } else if (navigator.onLine && lastSupabaseOk && !isOfflineSession) {
     badge.className = 'online';
     badge.title = 'Connected';
+  } else if (isOfflineSession || !navigator.onLine) {
+    badge.className = '';
+    badge.title = navigator.onLine ? 'Offline session — verifying' : 'Offline';
   } else {
     badge.className = '';
-    badge.title = navigator.onLine ? 'Supabase unreachable' : 'Offline';
+    badge.title = 'Supabase unreachable';
   }
   updateSettingsQueue();
 }
 window.addEventListener('online', async () => {
   updateOnlineBadge();
+  if (!currentUser) return; // not signed in yet
+  await reconcileSession();
+});
+window.addEventListener('offline', updateOnlineBadge);
+
+// On reconnect, always re-verify with Supabase before trusting the session,
+// then sync any queued work. If no valid session, prompt for re-auth.
+async function reconcileSession() {
+  let session = null;
+  try { ({ data: { session } } = await sb.auth.getSession()); } catch {}
+
+  if (!session) {
+    // Either an offline-bypass session, or the stored token expired.
+    needsReauth = true;
+    isOfflineSession = true;
+    updateOnlineBadge();
+    if (getQueue().length) showReauthPrompt();
+    return;
+  }
+
+  // Valid session — we're fully online again.
+  needsReauth = false;
+  isOfflineSession = false;
+  await loadProfile(session.user.id);
+
   const pending = getQueue().length;
-  if (!pending) return;
-  showToast(`Back online — syncing ${pending} item${pending !== 1 ? 's' : ''}…`);
+  if (pending) showToast(`Back online — syncing ${pending} item${pending !== 1 ? 's' : ''}…`);
   const synced = await flushQueue();
   await loadLocationsCache();
   await loadOccurrences();
   updateSettingsQueue();
   if (synced > 0) showToast(`✓ ${synced} item${synced !== 1 ? 's' : ''} synced`);
-});
-window.addEventListener('offline', updateOnlineBadge);
+}
+
+// Non-destructive banner: queued data stays safe; user signs in to push it.
+function showReauthPrompt() {
+  let bar = document.getElementById('reauth-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'reauth-bar';
+    bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9000;background:var(--accent,#7a5c3e);color:#fff;padding:12px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-size:.85rem;box-shadow:0 -2px 12px rgba(0,0,0,.3);';
+    bar.innerHTML = `<span>Reconnected — sign in to sync your offline records.</span>
+      <button class="btn" style="background:#fff;color:#000;padding:6px 14px;font-size:.8rem;" onclick="document.getElementById('reauth-bar').remove();signOut();">Sign in</button>`;
+    document.body.appendChild(bar);
+  }
+}
 
 // ════════════════════════════════════════════════════════════
 //  HELPERS
@@ -1202,6 +1285,63 @@ function hideLoading() {
 }
 
 // ════════════════════════════════════════════════════════════
+//  OFFLINE AUTH
+//  On a successful ONLINE sign-in we store a PBKDF2 hash of the
+//  password plus the user's profile on this device. That lets the
+//  user sign in OFFLINE later (password verified against the local
+//  hash), and we always re-verify with Supabase once back online.
+// ════════════════════════════════════════════════════════════
+const OFFLINE_AUTH_KEY = 'wdc_offline_auth';
+const PBKDF2_ITERATIONS = 150000;
+
+function bufToB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function b64ToBuf(b64) {
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+async function derivePwHash(password, saltBytes) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial, 256);
+  return bufToB64(bits);
+}
+function getOfflineAuth() {
+  try { return JSON.parse(localStorage.getItem(OFFLINE_AUTH_KEY) || 'null'); } catch { return null; }
+}
+// Save device credentials after a verified online sign-in.
+async function saveOfflineAuth(user, profile, password) {
+  try {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const pwHash = await derivePwHash(password, salt);
+    const rec = {
+      userId: user.id,
+      email: (user.email || profile?.email || '').toLowerCase(),
+      fullName: profile?.full_name || user.email || '',
+      role: profile?.role || 'collector',
+      salt: bufToB64(salt),
+      pwHash,
+      lastVerified: new Date().toISOString()
+    };
+    localStorage.setItem(OFFLINE_AUTH_KEY, JSON.stringify(rec));
+  } catch (e) {
+    console.warn('Could not store offline credentials:', e);
+  }
+}
+async function verifyOfflinePassword(email, password) {
+  const rec = getOfflineAuth();
+  if (!rec) return { ok: false, reason: 'none' };
+  if (rec.email !== email.toLowerCase()) return { ok: false, reason: 'email' };
+  try {
+    const hash = await derivePwHash(password, b64ToBuf(rec.salt));
+    return hash === rec.pwHash ? { ok: true, rec } : { ok: false, reason: 'password' };
+  } catch { return { ok: false, reason: 'error' }; }
+}
+
+// ════════════════════════════════════════════════════════════
 //  AUTH
 // ════════════════════════════════════════════════════════════
 async function signIn() {
@@ -1210,34 +1350,90 @@ async function signIn() {
   const errEl = document.getElementById('login-error');
   errEl.style.display = 'none';
   if (!email || !pwd) { errEl.textContent = 'Email and password are required.'; errEl.style.display = 'block'; return; }
+
+  // ── Offline sign-in path ──────────────────────────────────
+  if (!navigator.onLine) {
+    showLoading('Signing in offline…');
+    const res = await verifyOfflinePassword(email, pwd);
+    hideLoading();
+    if (!res.ok) {
+      errEl.textContent =
+        res.reason === 'none'   ? 'No offline access on this device yet. Connect to the internet and sign in once first.' :
+        res.reason === 'email'  ? 'That email hasn’t signed in on this device. Connect to the internet to sign in.' :
+        'Incorrect password.';
+      errEl.style.display = 'block';
+      return;
+    }
+    await startOfflineSession(res.rec);
+    return;
+  }
+
+  // ── Online sign-in path ───────────────────────────────────
   showLoading('Signing in…');
   const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
   hideLoading();
-  if (error) { errEl.textContent = error.message; errEl.style.display = 'block'; return; }
-  await onAuthSuccess(data.user);
+  if (error) {
+    // If the network dropped mid-attempt, fall back to offline verification.
+    const res = await verifyOfflinePassword(email, pwd);
+    if (res.ok) { await startOfflineSession(res.rec); return; }
+    errEl.textContent = error.message; errEl.style.display = 'block'; return;
+  }
+  await onAuthSuccess(data.user, pwd);
 }
 
 async function signOut() {
-  await sb.auth.signOut();
+  if (!isOfflineSession) { try { await sb.auth.signOut(); } catch {} }
+  localStorage.removeItem(OFFLINE_AUTH_KEY); // explicit sign-out clears device access
   currentUser = null; currentProfile = null;
+  isOfflineSession = false; needsReauth = false;
   showLoginView();
 }
 
-async function onAuthSuccess(user) {
+// Full online session: load profile, persist device creds, hydrate caches.
+async function onAuthSuccess(user, password) {
   currentUser = user;
+  isOfflineSession = false;
+  needsReauth = false;
   await loadProfile(user.id);
+  if (password) await saveOfflineAuth(user, currentProfile, password);
   showAppView();
   await loadLocationsCache();
   await loadOccurrences();
   updateOnlineBadge();
+  // Sync anything captured during a prior offline session.
+  if (getQueue().length) flushQueue().then(() => { loadLocationsCache(); loadOccurrences(); updateSettingsQueue(); });
+}
+
+// Offline bypass session: identity restored from device credentials, no live JWT.
+async function startOfflineSession(rec) {
+  currentUser = { id: rec.userId, email: rec.email };
+  currentProfile = { full_name: rec.fullName, email: rec.email, role: rec.role };
+  isOfflineSession = true;
+  renderProfile();
+  showAppView();
+  await loadLocationsCache();
+  await loadOccurrences();
+  updateOnlineBadge();
+  showToast('Signed in offline — will verify when reconnected');
 }
 
 async function loadProfile(userId) {
-  const { data } = await sb.from('profiles').select('*').eq('id', userId).single();
-  currentProfile = data || { full_name: currentUser.email, email: currentUser.email, role: 'collector' };
+  if (navigator.onLine && !isOfflineSession) {
+    const { data } = await sb.from('profiles').select('*').eq('id', userId).single();
+    currentProfile = data || { full_name: currentUser.email, email: currentUser.email, role: 'collector' };
+  } else if (!currentProfile) {
+    const rec = getOfflineAuth();
+    currentProfile = rec ? { full_name: rec.fullName, email: rec.email, role: rec.role }
+                         : { full_name: currentUser.email, email: currentUser.email, role: 'collector' };
+  }
+  renderProfile();
+}
+
+function renderProfile() {
+  if (!currentProfile) return;
   document.getElementById('header-user').textContent = currentProfile.full_name || currentProfile.email;
   document.getElementById('settings-name').textContent = currentProfile.full_name || '—';
-  document.getElementById('settings-email').textContent = currentProfile.email || currentUser.email;
+  document.getElementById('settings-email').textContent = currentProfile.email || (currentUser && currentUser.email) || '';
   const roleBadge = document.getElementById('settings-role');
   const role = currentProfile.role || 'collector';
   roleBadge.innerHTML = `<span class="badge badge-${role}">${role}</span>`;
@@ -1477,6 +1673,20 @@ function getChips(containerId) {
 //  LOCATIONS
 // ════════════════════════════════════════════════════════════
 async function loadLocationsCache() {
+  // Offline: read straight from the local cache — no network attempt, no hang.
+  if (!navigator.onLine) {
+    try { locationsCache = JSON.parse(localStorage.getItem('wdc_sites_cache') || '[]'); } catch { locationsCache = []; }
+    if (!locationsCache.length) showToast('Offline — no cached sites yet');
+    const saved = localStorage.getItem('wdc_active_site');
+    activeSiteId = (saved && locationsCache.find(l => l.id === saved)) ? saved : null;
+    if (!activeSiteId) localStorage.removeItem('wdc_active_site');
+    renderSitesList();
+    populateLocationDropdowns();
+    const offSite = locationsCache.find(l => l.id === activeSiteId);
+    const offTitle = document.getElementById('specimens-page-title');
+    if (offTitle) offTitle.textContent = offSite ? `Specimens — ${offSite.site_code}` : 'Specimens';
+    return;
+  }
   const { data, error } = await withTimeout(sb.from('locations').select('*').order('site_code'));
   if (error?.isTimeout) {
     showToast('Offline — showing cached sites');
@@ -1536,6 +1746,7 @@ function selectSite(id) {
 }
 
 async function deleteSite() {
+  if (!navigator.onLine) { showToast('Hiding or deleting a site requires a connection'); return; }
   const id = editingLocationId;
   const loc = locationsCache.find(l => l.id === id);
   if (!loc) return;
@@ -1659,10 +1870,11 @@ async function saveLocation() {
   const localId = data.id;
   enqueue({ action: 'upsert', table: 'locations', data, localId, timestamp: Date.now() });
 
-  // Optimistic update local cache
+  // Optimistic update local cache (and persist so it survives an offline reload)
   const existing = locationsCache.findIndex(l => l.id === localId);
   if (existing >= 0) locationsCache[existing] = data; else locationsCache.push(data);
   locationsCache.sort((a,b) => a.site_code.localeCompare(b.site_code));
+  try { localStorage.setItem('wdc_sites_cache', JSON.stringify(locationsCache)); } catch {}
 
   renderSitesList();
   populateLocationDropdowns();
@@ -1680,6 +1892,18 @@ async function loadOccurrences(append = false) {
   const container = document.getElementById('specimens-list');
   if (!activeSiteId) {
     container.innerHTML = '<div class="empty-state"><p>Select a site on the Sites tab first.</p></div>';
+    return;
+  }
+
+  // Offline: render from the local cache (+ unsynced queue). No network, no hang.
+  if (!navigator.onLine) {
+    const cached = getCachedOccurrences(activeSiteId);
+    occurrencesAllLoaded = true;
+    if (!cached.length) {
+      container.innerHTML = '<div class="empty-state"><p>Offline — no cached specimens for this site yet.</p></div>';
+    } else {
+      renderOccurrenceCards(cached, false);
+    }
     return;
   }
 
@@ -1711,12 +1935,12 @@ async function loadOccurrences(append = false) {
   document.getElementById('load-more-spinner')?.remove();
 
   if (error?.isTimeout) {
-    const queued = getQueue()
-      .filter(q => q.table === 'occurrences' && q.data.location_id === activeSiteId)
-      .map(q => q.data);
-    if (queued.length) {
-      showToast('Offline — showing unsynced specimens');
-      renderOccurrenceCards(queued, false);
+    // Network stalled — fall back to whatever we have cached for this site.
+    const cached = getCachedOccurrences(activeSiteId);
+    occurrencesAllLoaded = true;
+    if (cached.length) {
+      showToast('Connection slow — showing cached specimens');
+      renderOccurrenceCards(cached, false);
     } else {
       container.innerHTML = '<div class="empty-state"><p>Offline — no cached specimens for this site.</p></div>';
     }
@@ -1725,6 +1949,9 @@ async function loadOccurrences(append = false) {
   if (error) { container.innerHTML = `<div class="error-msg">Error loading specimens: ${error.message}</div>`; return; }
 
   const items = data || [];
+
+  // Keep the local cache fresh so this site is browsable offline next time.
+  cacheOccurrences(activeSiteId, items);
 
   if (!append && items.length === 0) {
     container.innerHTML = '<div class="empty-state"><p>No specimens yet. Tap + to record the first find.</p></div>';
@@ -1743,7 +1970,7 @@ function renderOccurrenceCards(items, append = false) {
     <div class="card" onclick="openOccurrenceForm('${occ.id}')">
       <div class="card-row">
         <div style="flex:1;min-width:0;">
-          <div class="card-title">${occ.catalogNumber || '—'}</div>
+          <div class="card-title">${occ.catalogNumber || (occ.catalog_pending ? '<span style="opacity:.7;font-style:italic;">Pending — # on sync</span>' : '—')}</div>
           <div class="card-sub">${occ.scientific_name || 'Unidentified'} ${occ.verbatim_element ? '· '+occ.verbatim_element : ''}</div>
           <div class="card-meta">${fmtDate(occ.eventDate)}${occ.locations ? ' · '+occ.locations.site_code : ''}</div>
         </div>
@@ -1773,7 +2000,10 @@ function renderOccurrenceCards(items, append = false) {
 // ════════════════════════════════════════════════════════════
 //  CATALOG NUMBER GENERATION
 // ════════════════════════════════════════════════════════════
-async function generateCatalogNumber(locationId) {
+// Generate the next sequential catalog number for a site by querying the live DB.
+// Only meaningful online. `counters` is an optional {prefix: lastAssignedNum} map
+// used during batch sync so multiple pending records don't collide on the same number.
+async function generateCatalogNumber(locationId, counters) {
   const loc = locationsCache.find(l => l.id === locationId);
   if (!loc) return null;
   const siteCode = loc.site_code;
@@ -1794,7 +2024,7 @@ async function generateCatalogNumber(locationId) {
     }
   });
 
-  // Also check local queue
+  // Also check local queue (records still waiting to sync)
   const q = getQueue();
   q.forEach(item => {
     if (item.table === 'occurrences' && item.data.catalogNumber && item.data.catalogNumber.startsWith(prefix)) {
@@ -1804,7 +2034,12 @@ async function generateCatalogNumber(locationId) {
     }
   });
 
-  return `${prefix}${pad3(maxNum + 1)}`;
+  // Respect numbers already handed out earlier in this same sync batch
+  if (counters && (counters[prefix] || 0) > maxNum) maxNum = counters[prefix];
+
+  const next = maxNum + 1;
+  if (counters) counters[prefix] = next;
+  return `${prefix}${pad3(next)}`;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1893,11 +2128,17 @@ function openOccurrenceForm(occurrenceId) {
     document.getElementById('occ-location-id').value = activeSiteId || '';
     document.getElementById('occ-site-display').textContent = activeLoc ? `${activeLoc.site_code}${activeLoc.site_name ? ' — '+activeLoc.site_name : ''}` : '—';
     if (activeSiteId) {
-      document.getElementById('occ-catalog-display').textContent = 'Generating…';
-      generateCatalogNumber(activeSiteId).then(catNum => {
-        document.getElementById('occ-catalog-number').value = catNum || '';
-        document.getElementById('occ-catalog-display').textContent = catNum || '—';
-      });
+      if (navigator.onLine) {
+        document.getElementById('occ-catalog-display').textContent = 'Generating…';
+        generateCatalogNumber(activeSiteId).then(catNum => {
+          document.getElementById('occ-catalog-number').value = catNum || '';
+          document.getElementById('occ-catalog-display').textContent = catNum || '—';
+        });
+      } else {
+        // Offline: number is assigned when the record syncs.
+        document.getElementById('occ-catalog-number').value = '';
+        document.getElementById('occ-catalog-display').textContent = 'Pending — assigned on sync';
+      }
     }
     // Add first radial point
     addRadialPoint();
@@ -1908,15 +2149,26 @@ function openOccurrenceForm(occurrenceId) {
 }
 
 async function loadOccurrenceIntoForm(occId) {
+  // Offline: load from the local cache or the unsynced queue — no network.
+  if (!navigator.onLine) {
+    const queued = getQueue().find(q => q.table === 'occurrences' && q.localId === occId);
+    const cached = (getOccCache()[activeSiteId] || {})[occId];
+    const occ = queued?.data || cached;
+    if (occ) { populateOccurrenceForm(occ); }
+    else { showToast('Offline — specimen not in local cache'); }
+    return;
+  }
   showLoading('Loading specimen…');
   const { data: occ, error } = await withTimeout(sb.from('occurrences').select('*, locations(*)').eq('id', occId).single());
   hideLoading();
   if (error?.isTimeout) {
-    // Try to find in offline queue
+    // Try to find in offline queue / cache
     const queued = getQueue().find(q => q.table === 'occurrences' && q.localId === occId);
-    if (queued) {
+    const cached = (getOccCache()[activeSiteId] || {})[occId];
+    const fallback = queued?.data || cached;
+    if (fallback) {
       showToast('Offline — loading unsynced data');
-      populateOccurrenceForm(queued.data);
+      populateOccurrenceForm(fallback);
       return;
     }
     showToast('Offline — specimen not in local cache');
@@ -1927,8 +2179,9 @@ async function loadOccurrenceIntoForm(occId) {
 }
 
 async function populateOccurrenceForm(occ) {
+  const pendingLabel = occ.catalog_pending ? 'Pending — assigned on sync' : '—';
   document.getElementById('occ-form-title').textContent = occ.catalogNumber || 'Edit Specimen';
-  document.getElementById('occ-catalog-display').textContent = occ.catalogNumber || '—';
+  document.getElementById('occ-catalog-display').textContent = occ.catalogNumber || pendingLabel;
   document.getElementById('occ-catalog-number').value = occ.catalogNumber || '';
   document.getElementById('occ-location-id').value = occ.location_id || '';
   const occLoc = occ.locations || locationsCache.find(l => l.id === occ.location_id);
@@ -2057,9 +2310,14 @@ async function onLocationChange() {
   document.querySelectorAll('.radial-m2-label').forEach(el => el.textContent = m2Label + ' (cm)');
 
   if (!editingOccurrenceId) {
-    const catNum = await generateCatalogNumber(locId);
-    document.getElementById('occ-catalog-display').textContent = catNum || '—';
-    document.getElementById('occ-catalog-number').value = catNum || '';
+    if (navigator.onLine) {
+      const catNum = await generateCatalogNumber(locId);
+      document.getElementById('occ-catalog-display').textContent = catNum || '—';
+      document.getElementById('occ-catalog-number').value = catNum || '';
+    } else {
+      document.getElementById('occ-catalog-display').textContent = 'Pending — assigned on sync';
+      document.getElementById('occ-catalog-number').value = '';
+    }
   }
 }
 
@@ -2230,13 +2488,17 @@ async function uploadPendingPhotos(occurrenceId, catalogNumber) {
   const locId = document.getElementById('occ-location-id').value;
   const loc = locationsCache.find(l => l.id === locId);
   const siteCode = loc?.site_code || 'UNKNOWN';
+  // Pending = no catalog number yet (offline). Defer the final path until sync,
+  // after a real catalog number is assigned. Mark with the occurrence id + site.
+  const pending = !catalogNumber;
 
   for (let i = 0; i < pendingPhotos.length; i++) {
     const photo = pendingPhotos[i];
-    const filename = `${catalogNumber}_photo-${pad3(i+1)}.jpg`;
-    const storagePath = `${siteCode}/${catalogNumber}/${filename}`;
+    const seq = i + 1;
+    const filename = pending ? null : `${catalogNumber}_photo-${pad3(seq)}.jpg`;
+    const storagePath = pending ? null : `${siteCode}/${catalogNumber}/${filename}`;
 
-    if (navigator.onLine) {
+    if (!pending && navigator.onLine) {
       try {
         const blob = await fetch(photo.dataUrl).then(r => r.blob());
         const { error: upErr } = await sb.storage.from('media').upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
@@ -2245,24 +2507,29 @@ async function uploadPendingPhotos(occurrenceId, catalogNumber) {
             occurrence_id: occurrenceId,
             storage_path: storagePath,
             filename,
-            sequence_number: i + 1,
+            sequence_number: seq,
             media_type: 'image/jpeg',
             created_by: currentUser.id
           });
+        } else {
+          await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq, catalogNumber, siteCode, pending: false });
         }
       } catch (e) {
-        // Store in IDB for later
-        await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq: i+1, catalogNumber });
+        await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq, catalogNumber, siteCode, pending: false });
       }
     } else {
-      await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq: i+1, catalogNumber });
+      // Offline, or no catalog number yet — queue in IDB; path resolved at sync.
+      await storePhotoIDB({ dataUrl: photo.dataUrl, occurrenceId, storagePath, filename, seq, catalogNumber: catalogNumber || null, siteCode, pending });
     }
   }
 }
 
 async function syncPendingPhotos() {
+  if (!navigator.onLine) return;
   const photos = await getAllPhotosIDB();
   for (const photo of photos) {
+    // Skip photos whose owning occurrence hasn't been assigned a path yet.
+    if (photo.pending || !photo.storagePath) continue;
     try {
       const blob = await fetch(photo.dataUrl).then(r => r.blob());
       const { error: upErr } = await sb.storage.from('media').upload(photo.storagePath, blob, { contentType: 'image/jpeg', upsert: true });
@@ -2315,6 +2582,8 @@ async function saveOccurrence() {
 
   const radialMeasurements = getRadialMeasurements();
   const catalogNumber = document.getElementById('occ-catalog-number').value;
+  // No catalog number yet (saved offline) → defer assignment to sync time.
+  const catalogPending = !catalogNumber;
   const isNew = !editingOccurrenceId;
   const occId = editingOccurrenceId || genUUID();
 
@@ -2324,7 +2593,8 @@ async function saveOccurrence() {
     institution_code: 'WDC',
     collection_code: 'PALEO',
     basis_of_record: 'FossilSpecimen',
-    catalogNumber: catalogNumber,
+    catalogNumber: catalogNumber || null,
+    catalog_pending: catalogPending,
     location_id: locationId,
     eventDate: document.getElementById('occ-event-date').value || null,
     recordedBy: document.getElementById('occ-recorded-by').value.trim() || null,
@@ -2434,16 +2704,47 @@ async function saveOccurrence() {
 // ════════════════════════════════════════════════════════════
 async function flushQueue() {
   if (!navigator.onLine) return 0;
+  // A valid Supabase session is required for writes (RLS). If we only have an
+  // offline-bypass session, defer syncing until the user re-authenticates.
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { needsReauth = true; updateOnlineBadge(); return 0; }
+  needsReauth = false;
+
   const q = getQueue();
   if (!q.length) return 0;
 
+  const counters = {}; // per-prefix counter to avoid intra-batch collisions
   let synced = 0;
-  for (const item of q) {
+  // Sync in dependency order: sites before specimens (FK location_id),
+  // specimens before their custody events (FK occurrence_id).
+  const rank = { locations: 0, occurrences: 1, custody_events: 2 };
+  const order = [...q].sort((a, b) => (rank[a.table] ?? 3) - (rank[b.table] ?? 3));
+
+  for (const item of order) {
     try {
       let err;
       if (item.action === 'upsert') {
-        const { error } = await sb.from(item.table).upsert(item.data, { onConflict: 'id' });
+        const payload = { ...item.data };
+
+        // Assign a real catalog number now if this record was saved offline.
+        if (item.table === 'occurrences' && (payload.catalog_pending || !payload.catalogNumber)) {
+          const realCat = await generateCatalogNumber(payload.location_id, counters);
+          if (realCat) {
+            payload.catalogNumber = realCat;
+            // Repath any photos queued under this occurrence to the real number.
+            await assignPhotoPaths(payload.id, payload.location_id, realCat);
+          }
+        }
+        // Strip app-only flags that aren't real DB columns.
+        delete payload.catalog_pending;
+
+        const { error } = await sb.from(item.table).upsert(payload, { onConflict: 'id' });
         err = error;
+        // Reflect the assigned number back into the queue item + caches on success.
+        if (!err && item.table === 'occurrences') {
+          item.data.catalogNumber = payload.catalogNumber;
+          delete item.data.catalog_pending;
+        }
       }
       if (!err) {
         dequeue(item.localId);
@@ -2460,14 +2761,33 @@ async function flushQueue() {
   return synced;
 }
 
+// Resolve queued photos (stored offline without a path) to their real
+// storage path once the owning occurrence has a catalog number.
+async function assignPhotoPaths(occurrenceId, locationId, catalogNumber) {
+  const loc = locationsCache.find(l => l.id === locationId);
+  const siteCode = loc?.site_code || 'UNKNOWN';
+  const photos = await getAllPhotosIDB();
+  for (const p of photos) {
+    if (p.occurrenceId !== occurrenceId || !p.pending) continue;
+    const filename = `${catalogNumber}_photo-${pad3(p.seq)}.jpg`;
+    const storagePath = `${siteCode}/${catalogNumber}/${filename}`;
+    await updatePhotoIDB({ ...p, filename, storagePath, catalogNumber, pending: false });
+  }
+}
+
 async function manualSync() {
   if (!navigator.onLine) { showToast('No network connection'); return; }
   showLoading('Syncing…');
-  await flushQueue();
+  const synced = await flushQueue();
+  hideLoading();
+  if (needsReauth) {
+    showToast('Sign in to sync your offline records');
+    showReauthPrompt();
+    return;
+  }
   await loadLocationsCache();
   await loadOccurrences();
-  hideLoading();
-  showToast('Sync complete');
+  showToast(synced > 0 ? `Synced ${synced} item${synced !== 1 ? 's' : ''}` : 'Sync complete');
   updateSettingsQueue();
 }
 
@@ -2485,8 +2805,40 @@ async function updateSettingsQueue() {
 //  SERVICE WORKER
 // ════════════════════════════════════════════════════════════
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Was the page already controlled when it loaded? If so, a later
+  // controller change means a NEW version took over → reload once to
+  // pick it up. (On the very first visit there's no prior controller,
+  // so we don't reload.)
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('sw.js');
+
+      // Tell an installed-but-waiting worker to activate immediately.
+      const promote = w => { if (w) w.postMessage('SKIP_WAITING'); };
+      if (reg.waiting) promote(reg.waiting);
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) promote(nw);
+        });
+      });
+
+      // Re-check for a new version whenever the app regains focus or
+      // reconnects — important for long-lived home-screen PWAs that
+      // are rarely fully closed.
+      const checkForUpdate = () => { if (navigator.onLine) reg.update().catch(() => {}); };
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+      window.addEventListener('online', checkForUpdate);
+    } catch (e) { /* SW unavailable (e.g. private mode) — app still works */ }
   });
 }
 
@@ -2494,12 +2846,19 @@ if ('serviceWorker' in navigator) {
 //  APP INIT
 // ════════════════════════════════════════════════════════════
 async function init() {
-  // Check existing session
-  const { data: { session } } = await sb.auth.getSession();
+  // Check existing session (reads from localStorage; safe offline)
+  let session = null;
+  try { ({ data: { session } } = await sb.auth.getSession()); } catch {}
   const splash = document.getElementById('splash');
 
   if (session?.user) {
+    // Existing Supabase session — restore without re-storing credentials.
     await onAuthSuccess(session.user);
+  } else if (!navigator.onLine && getOfflineAuth()) {
+    // Offline with remembered device credentials — require password via the
+    // login screen (offline bypass), don't silently auto-enter.
+    showLoginView();
+    document.getElementById('login-email').value = getOfflineAuth().email || '';
   } else {
     showLoginView();
   }
