@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>WDC Field App</title>
 <meta name="description" content="Wyoming Dinosaur Center field specimen collection app">
-<meta name="theme-color" content="#1a1714">
+<meta name="theme-color" content="#4A3728" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1410" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="WDC Field">
@@ -36,6 +37,27 @@
     --input-bg: #F0EBE4;
     --radius: 12px;
     --radius-sm: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1A1410;
+      --surface: #241E18;
+      --card: #2C2420;
+      --card2: #332B24;
+      --primary: #C4A882;
+      --accent: #C4A882;
+      --accent-dim: #9a7f60;
+      --success: #2ECC71;
+      --danger: #E74C3C;
+      --warn: #F39C12;
+      --text: #F0EBE4;
+      --text-dim: #9a8470;
+      --border: #3D3028;
+      --input-bg: #201A14;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
   }
 
   html, body {
@@ -205,7 +227,7 @@
   .card-meta { font-size: .78rem; color: var(--accent-dim); margin-top: 4px; }
   .card-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   /* Active site card */
-  .card.site-active { border: 2.5px solid var(--primary); background: #FFF8F0; box-shadow: 0 2px 8px rgba(74,55,40,.15); }
+  .card.site-active { border: 2.5px solid var(--primary); background: var(--card2); box-shadow: 0 2px 8px rgba(74,55,40,.15); }
   .site-edit-btn { font-size: .75rem; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); color: var(--primary); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 
   /* ── SECTION HEADERS ── */
