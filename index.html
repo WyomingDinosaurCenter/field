@@ -430,7 +430,7 @@
 
   <!-- MAIN APP (shown when authed) -->
   <header id="header" style="display:none;">
-    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v23</span></span>
+    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v24</span></span>
     <div id="online-badge" title="Connection status"></div>
     <span id="header-user"></span>
   </header>
@@ -2686,16 +2686,21 @@ async function saveOccurrence() {
     }
   }
 
+  // Reset edit state before re-rendering the list.
+  editingOccurrenceId = null;
+
   // Try to flush
   if (navigator.onLine) {
     await flushQueue();
     await loadOccurrences();
     showToast('Specimen saved and synced');
   } else {
+    // Offline: re-render immediately from cache + queue so the new
+    // "Pending" specimen shows up right away (it was just enqueued).
+    await loadOccurrences();
     showToast('Saved offline — will sync when online');
   }
 
-  editingOccurrenceId = null;
   showView('specimens');
 }
 
