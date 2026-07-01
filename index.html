@@ -430,7 +430,7 @@
 
   <!-- MAIN APP (shown when authed) -->
   <header id="header" style="display:none;">
-    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v24</span></span>
+    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v25</span></span>
     <div id="online-badge" title="Connection status"></div>
     <span id="header-user"></span>
   </header>
@@ -1216,6 +1216,7 @@ async function reconcileSession() {
   needsReauth = false;
   isOfflineSession = false;
   await loadProfile(session.user.id);
+  await loadReferenceData();
 
   const pending = getQueue().length;
   if (pending) showToast(`Back online — syncing ${pending} item${pending !== 1 ? 's' : ''}…`);
@@ -1397,6 +1398,7 @@ async function onAuthSuccess(user, password) {
   await loadProfile(user.id);
   if (password) await saveOfflineAuth(user, currentProfile, password);
   showAppView();
+  await loadReferenceData();
   await loadLocationsCache();
   await loadOccurrences();
   updateOnlineBadge();
@@ -1411,6 +1413,7 @@ async function startOfflineSession(rec) {
   isOfflineSession = true;
   renderProfile();
   showAppView();
+  await loadReferenceData();
   await loadLocationsCache();
   await loadOccurrences();
   updateOnlineBadge();
@@ -1563,10 +1566,65 @@ const PALEO_DATA = {
   Other:    { epochs: ['Other'], 'Other': ['Indeterminate','Other'] }
 };
 
+// ── Reference data (formations → epochs → taxa) ─────────────
+// Loaded from Supabase and cached; falls back to the built-in PALEO_DATA
+// above when offline with no cache. Same shape so all callers are unchanged.
+const REF_CACHE_KEY = 'wdc_refdata_cache';
+let PALEO = PALEO_DATA;
+(function () { try { const c = JSON.parse(localStorage.getItem(REF_CACHE_KEY)||'null'); if (c && c.data && Object.keys(c.data).length) PALEO = c.data; } catch {} })();
+
+function buildPaleo(forms, taxa) {
+  const idToName = {}; forms.forEach(f => idToName[f.id] = f.name);
+  const out = {};
+  forms.forEach(f => { out[f.name] = { epochs: [] }; });
+  (taxa || []).forEach(t => {
+    const fname = idToName[t.formation_id]; if (!fname) return;
+    const node = (out[fname] ||= { epochs: [] });
+    const ep = t.epoch || 'Unknown';
+    if (!node.epochs.includes(ep)) node.epochs.push(ep);
+    (node[ep] ||= []).push(t.scientific_name);
+  });
+  return out;
+}
+
+// Refresh reference data from Supabase (online); cache for offline use.
+async function loadReferenceData() {
+  if (navigator.onLine) {
+    try {
+      const [{ data: forms }, { data: taxa }] = await Promise.all([
+        sb.from('formations').select('id,name,display_order').eq('is_active', true).order('display_order'),
+        sb.from('taxa').select('formation_id,epoch,scientific_name,display_order,is_active').eq('is_active', true).order('display_order')
+      ]);
+      if (forms && forms.length && Array.isArray(taxa)) {
+        const built = buildPaleo(forms, taxa);
+        if (Object.keys(built).length) {
+          PALEO = built;
+          try { localStorage.setItem(REF_CACHE_KEY, JSON.stringify({ data: built, ts: Date.now() })); } catch {}
+        }
+      }
+    } catch (e) { /* keep cached / fallback */ }
+  }
+  populateFormationSelects();
+}
+
+// Rebuild the formation dropdowns from the active reference data.
+function populateFormationSelects() {
+  const names = Object.keys(PALEO);
+  if (!names.length) return;
+  ['loc-formation', 'occ-formation'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— select —</option>' +
+      names.map(n => `<option value="${n}">${n}</option>`).join('');
+    if (cur && names.includes(cur)) sel.value = cur;
+  });
+}
+
 function onFormationChange() {
   const formation = document.getElementById('occ-formation').value;
   const epochSel = document.getElementById('occ-epoch');
-  const fd = PALEO_DATA[formation];
+  const fd = PALEO[formation];
   if (fd) {
     epochSel.innerHTML = '<option value="">— select —</option>' +
       fd.epochs.map(e => `<option value="${e}">${e}</option>`).join('');
@@ -1580,7 +1638,7 @@ function onFormationChange() {
 function onLocFormationChange() {
   const formation = document.getElementById('loc-formation').value;
   const epochSel = document.getElementById('loc-epoch');
-  const fd = PALEO_DATA[formation];
+  const fd = PALEO[formation];
   if (fd) {
     epochSel.innerHTML = '<option value="">— select —</option>' +
       fd.epochs.map(e => `<option value="${e}">${e}</option>`).join('');
@@ -1592,7 +1650,7 @@ function onLocFormationChange() {
 
 // Build the scientific name select — site's known taxa at top, separator, full list below
 function buildTaxonOptions(formation, epoch, siteTaxa) {
-  const allTaxa = PALEO_DATA[formation]?.[epoch] || [];
+  const allTaxa = PALEO[formation]?.[epoch] || [];
   const sel = document.getElementById('occ-scientific-name');
   const cur = sel.value;
   const siteKnown = (siteTaxa || []).filter(t => t && t !== 'Indeterminate' && t !== 'Other');
