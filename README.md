@@ -18,6 +18,7 @@ Field teams use this app to log paleontological specimens at the moment of disco
 - **Offline sign-in** — after one online sign-in on a device, the user can sign in offline with their password (verified against a local hash); always re-verified with Supabase on reconnect
 - **Local cache** — all sites and the active site's specimens are cached on-device so they remain browsable offline
 - **Shared reference data** — formation, epoch, and taxon lists come from the Supabase `formations`/`taxa` tables (managed in the admin app), cached on-device for offline use, with a built-in fallback list if never synced
+- **Auto taxonomy** — on save, the scientific name is parsed into genus + specific epithet and the Linnaean hierarchy (kingdom/phylum/class/order/family) is filled from the cached genus reference, so records arrive in the catalog already classified
 - **Darwin Core aligned** — all fields map directly to DwC / PaleoContext terms
 - **Audit log** — every change to sites and specimens is recorded with full before/after snapshots and user attribution
 - **GPS + compass capture** — tap to fill coordinates and specimen orientation from device sensors

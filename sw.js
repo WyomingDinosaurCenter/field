@@ -10,7 +10,7 @@
 //  iPhone-first (iOS Safari / standalone PWA); also works on
 //  Android/Chromium. Uses relative URLs so it is path-portable.
 // ════════════════════════════════════════════════════════════
-const CACHE_NAME = 'wdc-field-v25';
+const CACHE_NAME = 'wdc-field-v26';
 const APP_SHELL  = [
   './',
   './index.html',

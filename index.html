@@ -430,7 +430,7 @@
 
   <!-- MAIN APP (shown when authed) -->
   <header id="header" style="display:none;">
-    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v25</span></span>
+    <span id="header-title">WDC Field <span style="font-size:.65rem;opacity:.5;font-weight:400">v26</span></span>
     <div id="online-badge" title="Connection status"></div>
     <span id="header-user"></span>
   </header>
@@ -1571,7 +1571,25 @@ const PALEO_DATA = {
 // above when offline with no cache. Same shape so all callers are unchanged.
 const REF_CACHE_KEY = 'wdc_refdata_cache';
 let PALEO = PALEO_DATA;
-(function () { try { const c = JSON.parse(localStorage.getItem(REF_CACHE_KEY)||'null'); if (c && c.data && Object.keys(c.data).length) PALEO = c.data; } catch {} })();
+let GENERA = {};   // genus name -> { kingdom, phylum, class, order, family } for taxonomy auto-fill
+(function () { try { const c = JSON.parse(localStorage.getItem(REF_CACHE_KEY)||'null'); if (c) { if (c.data && Object.keys(c.data).length) PALEO = c.data; if (c.genera) GENERA = c.genera; } } catch {} })();
+
+// Derive genus, species, and Linnaean hierarchy from a scientific name.
+function deriveTaxonomy(name) {
+  const parts = (name || '').trim().split(/\s+/);
+  const genus = parts[0] || '', epithet = parts[1] || '';
+  if (!genus || name === 'Indeterminate' || name === 'Other') return {};
+  const g = GENERA[genus] || {};
+  return {
+    genus,
+    specific_epithet: epithet || null,
+    kingdom: g.kingdom || 'Animalia',
+    phylum: g.phylum || null,
+    class: g.class || null,
+    order: g.order || null,
+    family: g.family || null
+  };
+}
 
 function buildPaleo(forms, taxa) {
   const idToName = {}; forms.forEach(f => idToName[f.id] = f.name);
@@ -1591,15 +1609,19 @@ function buildPaleo(forms, taxa) {
 async function loadReferenceData() {
   if (navigator.onLine) {
     try {
-      const [{ data: forms }, { data: taxa }] = await Promise.all([
+      const [{ data: forms }, { data: taxa }, { data: gen }] = await Promise.all([
         sb.from('formations').select('id,name,display_order').eq('is_active', true).order('display_order'),
-        sb.from('taxa').select('formation_id,epoch,scientific_name,display_order,is_active').eq('is_active', true).order('display_order')
+        sb.from('taxa').select('formation_id,epoch,scientific_name,display_order,is_active').eq('is_active', true).order('display_order'),
+        sb.from('genera').select('name,kingdom,phylum,"class","order",family')
       ]);
       if (forms && forms.length && Array.isArray(taxa)) {
         const built = buildPaleo(forms, taxa);
+        const generaMap = {};
+        (gen || []).forEach(g => generaMap[g.name] = { kingdom: g.kingdom, phylum: g.phylum, class: g.class, order: g.order, family: g.family });
         if (Object.keys(built).length) {
           PALEO = built;
-          try { localStorage.setItem(REF_CACHE_KEY, JSON.stringify({ data: built, ts: Date.now() })); } catch {}
+          if (Object.keys(generaMap).length) GENERA = generaMap;
+          try { localStorage.setItem(REF_CACHE_KEY, JSON.stringify({ data: built, genera: GENERA, ts: Date.now() })); } catch {}
         }
       }
     } catch (e) { /* keep cached / fallback */ }
@@ -2645,11 +2667,15 @@ async function saveOccurrence() {
   const isNew = !editingOccurrenceId;
   const occId = editingOccurrenceId || genUUID();
 
+  // Resolve the scientific name, then auto-derive genus + Linnaean hierarchy.
+  const sciName = (() => { const s = document.getElementById('occ-scientific-name').value; return s === 'Other' ? (document.getElementById('occ-taxon-other').value.trim() || null) : (s || null); })();
+  const taxo = deriveTaxonomy(sciName);
+
   const data = {
     id: occId,
     occurrence_id: occId,
     institution_code: 'WDC',
-    collection_code: 'PALEO',
+    collection_code: 'FIELD',
     basis_of_record: 'FossilSpecimen',
     catalogNumber: catalogNumber || null,
     catalog_pending: catalogPending,
@@ -2657,7 +2683,8 @@ async function saveOccurrence() {
     eventDate: document.getElementById('occ-event-date').value || null,
     recordedBy: document.getElementById('occ-recorded-by').value.trim() || null,
     intern_staff: document.getElementById('occ-intern-staff').value.trim() || null,
-    scientific_name: (() => { const s = document.getElementById('occ-scientific-name').value; return s === 'Other' ? (document.getElementById('occ-taxon-other').value.trim() || null) : (s || null); })(),
+    scientific_name: sciName,
+    ...taxo,
     verbatim_element: (() => { const s = document.getElementById('occ-verbatim-element').value; return s === 'Other' ? (document.getElementById('occ-element-other').value.trim() || null) : (s || null); })(),
     element_side: elementSide || null,
     element_remarks: document.getElementById('occ-element-remarks').value.trim() || null,
@@ -2732,7 +2759,6 @@ async function saveOccurrence() {
   }
 
   // Update site's associated_taxa if this taxon is new to the site
-  const sciName = data.scientific_name;
   if (sciName && sciName !== 'Indeterminate' && sciName !== 'Other' && locationId) {
     const site = locationsCache.find(l => l.id === locationId);
     if (site && !(site.associated_taxa || []).includes(sciName)) {
