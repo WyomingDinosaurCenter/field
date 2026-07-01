@@ -17,6 +17,7 @@ Field teams use this app to log paleontological specimens at the moment of disco
 - **Offline-first** — full read/write with no connectivity; syncs automatically when back online with item count feedback
 - **Offline sign-in** — after one online sign-in on a device, the user can sign in offline with their password (verified against a local hash); always re-verified with Supabase on reconnect
 - **Local cache** — all sites and the active site's specimens are cached on-device so they remain browsable offline
+- **Shared reference data** — formation, epoch, and taxon lists come from the Supabase `formations`/`taxa` tables (managed in the admin app), cached on-device for offline use, with a built-in fallback list if never synced
 - **Darwin Core aligned** — all fields map directly to DwC / PaleoContext terms
 - **Audit log** — every change to sites and specimens is recorded with full before/after snapshots and user attribution
 - **GPS + compass capture** — tap to fill coordinates and specimen orientation from device sensors
@@ -147,6 +148,7 @@ CDN libraries (Supabase JS) are cache-first since they are version-pinned and im
 - **Reads** — all sites and the active site's specimens are cached in `localStorage` (specimens accumulate as sites are opened online). Offline, the Sites and Specimens views, and the specimen edit form, read straight from this cache with no network attempt.
 - **Writes** — every change made offline is queued in `localStorage`; photos are queued in IndexedDB. On reconnect the queue is flushed in dependency order (sites → specimens → custody events).
 - **Catalog numbers** — generated against the live database, so they are **deferred while offline**. Offline records display "Pending — assigned on sync" and receive their real sequential `{SITE}-{YYYY}-{###}` number when synced, with a per-site counter that prevents collisions across a batch of offline finds. Queued photos are repathed to the real catalog number before upload.
+- **Reference data** — formations, epochs, and taxa are loaded from the Supabase reference tables on sign-in and on reconnect, cached in `localStorage`. Offline, the dropdowns read from that cache; with no cache at all, a built-in list is used. Adding a taxon in the admin app therefore appears in the field app after its next sync.
 
 ### Authentication offline
 
